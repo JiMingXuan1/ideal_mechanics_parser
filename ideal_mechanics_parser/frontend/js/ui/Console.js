@@ -62,7 +62,15 @@ export class Console {
         const mode = parts[1]?.toLowerCase();
         if (mode === 'g') {
           this.sm.gravitationEnabled = !this.sm.gravitationEnabled;
-          this._log('success', `Universal gravity ${this.sm.gravitationEnabled ? 'ON' : 'OFF'} (G=0.0002959, Gauss units)`);
+          // Auto-switch to XY to avoid uniform gravity conflict
+          if (this.sm.gravitationEnabled && this.sm.viewPlane !== 'XY') {
+            this.eb.emit('CMD_GAMEMODE_CHANGE', 'XY');
+          }
+          this._log('success', `Universal gravity ${this.sm.gravitationEnabled ? 'ON' : 'OFF'} (G=0.0002959)`);
+          if (this.sm.gravitationEnabled) {
+            this._log('info', 'Units: m=solar mass, r=AU, t=day. orbital velocity ~0.017 AU/day at 1 AU.');
+            this._log('info', 'Tip: place m=1 at (1,0) with vy=0.017 for circular orbit around m=1 at (0,0)');
+          }
         } else if (mode === 'xy' || mode === 'xz') {
           this.eb.emit('CMD_GAMEMODE_CHANGE', mode.toUpperCase());
           this._log('success', `View plane set to ${mode.toUpperCase()}`);
@@ -148,6 +156,9 @@ export class Console {
           if (onoff === 'on') this.sm.gravitationEnabled = true;
           else if (onoff === 'off') this.sm.gravitationEnabled = false;
           else this.sm.gravitationEnabled = !this.sm.gravitationEnabled;
+          if (this.sm.gravitationEnabled && this.sm.viewPlane !== 'XY') {
+            this.eb.emit('CMD_GAMEMODE_CHANGE', 'XY');
+          }
           this._log('success', `Universal gravity ${this.sm.gravitationEnabled ? 'ON' : 'OFF'}`);
         } else {
           this._log('error', 'Usage: gravity universal on|off');
