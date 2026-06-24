@@ -116,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
                 from io_handler.parser import _validate
                 _validate(topology)
                 engine = Engine(topology)
-                engine.run_stream(on_chunk=lambda c: self._send_sse(c))
+                engine.run_events(on_chunk=lambda c: self._send_sse(c))
                 self._send_sse({"complete": True})
             except TopologyError as e:
                 self._send_sse({"error": str(e), "complete": True})

@@ -146,31 +146,18 @@ eb.on('EDGE_END', ({ fromId, toId }) => {
 
 // --- Streaming + Playback ---
 
-function _topologyHasEvents(topology) {
-  for (const n of topology.nodes) {
-    if (n.params?.radius > 0) return true;
-  }
-  for (const e of topology.edges) {
-    if (e.type === 'SoftRope') return true;
-  }
-  return false;
-}
-
 function _startPlayback() {
   if (sm._playTimer) return;
-  const totalSimTime = sm.trajectory.t[sm.trajectory.t.length - 1] || 0;
-  const targetDuration = 15;
-  const speed = Math.max(1, totalSimTime / targetDuration);
   let _lastStatus = '';
 
   sm._playStart = performance.now();
   const tick = () => {
     if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
     if (sm.isPlaying) {
-      const raw = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
-      const elapsed = raw * speed;
+      const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
+      const speed = sm._playSpeed || 1;
       const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
-      sm.playhead = Math.min(elapsed, latest);
+      sm.playhead = Math.min(elapsed * speed, latest);
       const s = `${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`;
       if (s !== _lastStatus) { _lastStatus = s; setStatus(`<span class="highlight">▶</span> t = ${s}`); }
     } else {
@@ -216,26 +203,7 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
   sm._pausedAt = 0;
   _emitSimState();
 
-  const hasEvents = _topologyHasEvents(topology);
-
-  if (hasEvents) {
-    setStatus('Computing <span class="highlight">collision</span>...');
-    apiClient.solve(topology).then((data) => {
-      if (sm.mode !== 'simulation') return;
-      sm.trajectory = data;
-    
-      setStatus(`<span class="highlight">▶</span> t = 0.0s / ${(data.t[data.t.length-1] || 0).toFixed(1)}s`);
-      _startPlayback(data);
-    }).catch((err) => {
-      sm.mode = 'edit';
-      eb.emit('CONSOLE_LOG', { level: 'error', text: `Backend: ${err.message}` });
-      setStatus('Error — check console');
-      _emitSimState();
-    });
-    return;
-  }
-
-  // Streaming mode (no events)
+  // Streaming mode (handles both events and non-events via run_events)
   const allT = [], allQ = [];
 
   setStatus('Connecting to backend...');
@@ -250,9 +218,15 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
       return;
     }
     if (chunk.complete) return;
+    if (!chunk.t) return;  // skip event-only chunks
     allT.push(...chunk.t);
     allQ.push(...chunk.q);
-    sm.trajectory = { t: allT, q: allQ, node_order: chunk.node_order };
+    sm.trajectory = {
+      t: allT, q: allQ,
+      node_order: chunk.node_order,
+      body_dofs: sm.trajectory?.body_dofs || chunk.body_dofs,
+    };
+    if (chunk.qd) sm.trajectory.qd = sm.trajectory.qd ? [...sm.trajectory.qd, ...chunk.qd] : [...chunk.qd];
 
     if (!sm._playTimer) _startPlayback();
   }).catch((err) => {

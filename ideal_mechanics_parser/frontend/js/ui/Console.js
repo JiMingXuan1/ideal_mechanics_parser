@@ -137,6 +137,7 @@ export class Console {
         this._log('info', 'Commands:');
         this._log('info', '  gamemode xy|xz  — Switch plane (xy=no gravity, xz=gravity)');
         this._log('info', '  gamemode g      — Toggle universal gravity (Gauss units)');
+        this._log('info', '  speed <factor>   — Set playback speed (1=normal, 10=10x)');
         this._log('info', '  gravity universal on|off — Toggle N-body gravity');
         this._log('info', '  trails on|off          — Show/hide motion trails');
         this._log('info', '  duration <sec>  — Set max sim time (default 300)');
@@ -147,6 +148,16 @@ export class Console {
         this._log('info', '  set <k> <v>     — Modify selected entity property');
         this._log('info', '  undo / redo     — Undo/Redo');
         this._log('info', '  help            — This help');
+        break;
+      }
+      case 'speed': {
+        const factor = parseFloat(parts[1]);
+        if (isNaN(factor) || factor <= 0) {
+          this._log('error', 'Usage: speed <factor> (e.g. speed 10 for 10x)');
+          return;
+        }
+        this.sm._playSpeed = factor;
+        this._log('success', `Playback speed set to ${factor}x`);
         break;
       }
       case 'gravity': {

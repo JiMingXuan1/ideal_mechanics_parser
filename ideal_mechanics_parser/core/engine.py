@@ -187,11 +187,12 @@ class Engine:
             "body_dofs": body_dofs,
         }
 
-    def run_stream(self, on_chunk, seg_duration=0.5):
-        self._step1_instantiate()
-        self._step2_project()
-        self._step3_energy()
-        self._step4_constraints()
+    def run_stream(self, on_chunk, seg_duration=0.5, _skip_init=False):
+        if not _skip_init:
+            self._step1_instantiate()
+            self._step2_project()
+            self._step3_energy()
+            self._step4_constraints()
         L = self.T - self.V
         q = self.sm.q
         qd = self.sm.qd
@@ -424,7 +425,7 @@ class Engine:
         all_event_defs = collision_events + soft_rope_events
 
         if not all_event_defs:
-            self.run_stream(on_chunk)
+            self.run_stream(on_chunk, _skip_init=True)
             return
 
         L = self.T - self.V
