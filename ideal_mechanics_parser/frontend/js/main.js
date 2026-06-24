@@ -15,6 +15,7 @@ import { uid } from './core/utils.js';
 
 const eb = new EventBus();
 const sm = new StateMachine();
+window.sm = sm;  // expose for Playwright tests
 const history = new CommandHistory();
 const camera = new Camera();
 
