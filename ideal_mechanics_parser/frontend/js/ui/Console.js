@@ -130,6 +130,7 @@ export class Console {
         this._log('info', '  gamemode xy|xz  — Switch plane (xy=no gravity, xz=gravity)');
         this._log('info', '  gamemode g      — Toggle universal gravity (Gauss units)');
         this._log('info', '  gravity universal on|off — Toggle N-body gravity');
+        this._log('info', '  trails on|off          — Show/hide motion trails');
         this._log('info', '  duration <sec>  — Set max sim time (default 300)');
         this._log('info', '  run / stop      — Start / stop simulation');
         this._log('info', '  Space           — Pause / resume (while running)');
@@ -151,6 +152,14 @@ export class Console {
         } else {
           this._log('error', 'Usage: gravity universal on|off');
         }
+        break;
+      }
+      case 'trails': {
+        const onoff = parts[1]?.toLowerCase();
+        if (onoff === 'on') this.sm.trailsEnabled = true;
+        else if (onoff === 'off') this.sm.trailsEnabled = false;
+        else this.sm.trailsEnabled = !this.sm.trailsEnabled;
+        this._log('success', `Trails ${this.sm.trailsEnabled ? 'ON' : 'OFF'}`);
         break;
       }
       default: {

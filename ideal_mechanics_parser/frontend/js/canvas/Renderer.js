@@ -50,6 +50,10 @@ export class Renderer {
 
     Entities.drawGrid(ctx, this.camera, w, h);
 
+    if (this.sm.trailsEnabled && this.sm.mode === 'simulation' && this.sm.trajectory) {
+      this._drawTrails();
+    }
+
     if (this.sm.mode === 'simulation' && this.sm.trajectory) {
       this._drawSimulation();
     } else {
@@ -57,6 +61,52 @@ export class Renderer {
       this._drawEntities();
     }
 
+  }
+
+  _drawTrails() {
+    const traj = this.sm.trajectory;
+    if (!traj || !traj.t || traj.t.length === 0) return;
+    const totalFrames = traj.t.length;
+    const totalT = traj.t[totalFrames - 1];
+    const currentIdx = Math.min(
+      Math.floor((this.sm.playhead / totalT) * (totalFrames - 1)),
+      totalFrames - 1
+    );
+    if (currentIdx < 1) return;
+
+    const ctx = this.ctx;
+    const nodeOrder = traj.node_order;
+    const bodyDofs = traj.body_dofs || nodeOrder.map(() => 2);
+    const COLORS = ['#0969da','#cf222e','#2da44e','#8250df','#d29922','#0550ae','#1a7f37','#e16f24'];
+
+    let qi = 0;
+    for (let bi = 0; bi < nodeOrder.length; bi++) {
+      const dof = bodyDofs[bi];
+      const color = COLORS[bi % COLORS.length];
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      let started = false;
+      for (let f = 0; f <= currentIdx; f++) {
+        const q = traj.q[f];
+        if (!q) continue;
+        const wx = q[qi];
+        const wy = q[qi + 1];
+        if (wx == null || wy == null) continue;
+        const s = this.camera.worldToScreen(wx, wy);
+        if (!started) {
+          ctx.moveTo(s.x, s.y);
+          started = true;
+        } else {
+          ctx.lineTo(s.x, s.y);
+        }
+      }
+      ctx.stroke();
+      qi += dof;
+    }
+    ctx.globalAlpha = 1;
   }
 
   _drawEntities() {

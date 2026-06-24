@@ -13,6 +13,7 @@ export class StateMachine {
     this._playStartTime = 0;
     this._pausedDuration = 0;
     this.gravitationEnabled = false;
+    this.trailsEnabled = false;
   }
 
   get selectedCount() {
