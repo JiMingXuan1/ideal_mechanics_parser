@@ -1,6 +1,10 @@
 import sympy as sp
 
 
+GAUSS_G = 0.000295912208  # k^2, Gaussian gravitational constant squared
+EPS = 0.001               # softening length (AU units)
+
+
 def assemble_energy(points, edges, env, sm, rigid_bodies=None):
     T = 0
     V = 0
@@ -29,4 +33,38 @@ def assemble_energy(points, edges, env, sm, rigid_bodies=None):
             dist_sq = dx**2 + dy**2
             V += sp.Rational(1, 2) * e.k * (sp.sqrt(dist_sq) - e.l0)**2
 
+    # N-body gravitational potential (Gauss G = k^2)
+    grav = env.get("gravitation", {})
+    if grav.get("enabled"):
+        V_G = assemble_gravitational_potential(points, bodies, sm, grav)
+        V += V_G
+
     return T, V
+
+
+def assemble_gravitational_potential(points, rigid_bodies, sm, grav_cfg):
+    """N-body pairwise gravitational potential V_G.
+
+    V_G = -G * sum_{i<j} m_i * m_j / sqrt(|r_i - r_j|^2 + epsilon^2)
+
+    Uses Gaussian gravitational constant (k^2) when G is not specified.
+    """
+    G = float(grav_cfg.get("G", GAUSS_G))
+    eps = float(grav_cfg.get("epsilon", EPS))
+    eps_sq = eps * eps
+
+    all_bodies = list(points)
+    if rigid_bodies:
+        all_bodies.extend(rigid_bodies)
+
+    V_G = 0
+    for i in range(len(all_bodies)):
+        for j in range(i + 1, len(all_bodies)):
+            a = all_bodies[i]
+            b = all_bodies[j]
+            dx = a.x_sym - b.x_sym
+            dy = a.y_sym - b.y_sym
+            d_sq = dx**2 + dy**2
+            V_G += -G * a.m * b.m / sp.sqrt(d_sq + eps_sq)
+
+    return sp.simplify(V_G)

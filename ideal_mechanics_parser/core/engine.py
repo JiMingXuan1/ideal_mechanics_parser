@@ -144,6 +144,7 @@ class Engine:
     def _step3_energy(self):
         env = self.topology["system_env"]
         self.T, self.V = assemble_energy(self.points, self.edges, env, self.sm, self.rigid_bodies)
+        # N-body gravity is assembled inside assemble_energy when env.gravitation.enabled
 
     def _step4_constraints(self):
         self.holonomic = harvest_constraints(self.edges, self.sm)

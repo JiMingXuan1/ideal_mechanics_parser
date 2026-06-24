@@ -10,6 +10,9 @@ export class GraphBuilder {
       time_step: 0.01,
       duration: this.sm._simDuration || 300,
     };
+    if (this.sm.gravitationEnabled) {
+      env.gravitation = { enabled: true, G: 0.000295912208, epsilon: 0.001 };
+    }
 
     const nodes = [];
     for (const [id, entity] of this.sm.entities) {

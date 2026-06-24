@@ -12,6 +12,7 @@ export class StateMachine {
     this.isPlaying = true;
     this._playStartTime = 0;
     this._pausedDuration = 0;
+    this.gravitationEnabled = false;
   }
 
   get selectedCount() {

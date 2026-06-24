@@ -59,13 +59,16 @@ export class Console {
 
     switch (cmd) {
       case 'gamemode': {
-        const mode = parts[1];
-        if (mode !== 'xy' && mode !== 'xz') {
-          this._log('error', `Invalid gamemode "${mode}". Use "xy" or "xz".`);
-          return;
+        const mode = parts[1]?.toLowerCase();
+        if (mode === 'g') {
+          this.sm.gravitationEnabled = !this.sm.gravitationEnabled;
+          this._log('success', `Universal gravity ${this.sm.gravitationEnabled ? 'ON' : 'OFF'} (G=0.0002959, Gauss units)`);
+        } else if (mode === 'xy' || mode === 'xz') {
+          this.eb.emit('CMD_GAMEMODE_CHANGE', mode.toUpperCase());
+          this._log('success', `View plane set to ${mode.toUpperCase()}`);
+        } else {
+          this._log('error', `Usage: gamemode xy|xz|g`);
         }
-        this.eb.emit('CMD_GAMEMODE_CHANGE', mode.toUpperCase());
-        this._log('success', `View plane set to ${mode.toUpperCase()}`);
         break;
       }
       case 'duration': {
@@ -125,6 +128,8 @@ export class Console {
       case 'help': {
         this._log('info', 'Commands:');
         this._log('info', '  gamemode xy|xz  — Switch plane (xy=no gravity, xz=gravity)');
+        this._log('info', '  gamemode g      — Toggle universal gravity (Gauss units)');
+        this._log('info', '  gravity universal on|off — Toggle N-body gravity');
         this._log('info', '  duration <sec>  — Set max sim time (default 300)');
         this._log('info', '  run / stop      — Start / stop simulation');
         this._log('info', '  Space           — Pause / resume (while running)');
@@ -133,6 +138,19 @@ export class Console {
         this._log('info', '  set <k> <v>     — Modify selected entity property');
         this._log('info', '  undo / redo     — Undo/Redo');
         this._log('info', '  help            — This help');
+        break;
+      }
+      case 'gravity': {
+        const sub = parts[1]?.toLowerCase();
+        if (sub === 'universal') {
+          const onoff = parts[2]?.toLowerCase();
+          if (onoff === 'on') this.sm.gravitationEnabled = true;
+          else if (onoff === 'off') this.sm.gravitationEnabled = false;
+          else this.sm.gravitationEnabled = !this.sm.gravitationEnabled;
+          this._log('success', `Universal gravity ${this.sm.gravitationEnabled ? 'ON' : 'OFF'}`);
+        } else {
+          this._log('error', 'Usage: gravity universal on|off');
+        }
         break;
       }
       default: {
