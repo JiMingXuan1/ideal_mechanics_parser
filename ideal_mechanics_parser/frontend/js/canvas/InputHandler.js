@@ -99,7 +99,7 @@ export class InputHandler {
 
     if (this.sm.toolMode === 'add_node') {
       const world = this._screenToWorld(e.clientX, e.clientY);
-      this.eb.emit('ADD_ENTITY', { type: 'MassPoint', x: world.x, y: world.y });
+      this.eb.emit('ADD_ENTITY', { type: 'MassPoint', x: world.x, y: world.y, params: { radius: 0.1 } });
       return;
     }
 

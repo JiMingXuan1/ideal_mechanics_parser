@@ -353,6 +353,7 @@ class Engine:
                     "body_j": None,
                     "_anchor_x": ax,
                     "_anchor_y": ay,
+                    "_anchor_r": anchor_r,
                     "restitution": restitution,
                 })
         return events
@@ -500,6 +501,10 @@ class Engine:
                             e = float(ed.get("restitution", 1.0))
                             new_state[nq_snap + idx_i] -= (1 + e) * vn * nx
                             new_state[nq_snap + idx_i + 1] -= (1 + e) * vn * ny
+                            # Positional separation from anchor
+                            sep = max(0.0, (bi.radius + ed.get("_anchor_r", 0.0)) - dist) * 0.5 + 1e-10
+                            new_state[idx_i] += sep * nx
+                            new_state[idx_i + 1] += sep * ny
                     else:
                         idx_j = self._body_dof_index(bj)
                         xj = new_state[idx_j]
@@ -527,6 +532,13 @@ class Engine:
                             new_state[nq_snap + idx_i + 1] += impulse / mi * ny
                             new_state[nq_snap + idx_j] -= impulse / mj * nx
                             new_state[nq_snap + idx_j + 1] -= impulse / mj * ny
+
+                            # Positional separation: push apart along normal to prevent re-trigger
+                            sep = max(0.0, (bi.radius + bj.radius) - dist) * 0.5 + 1e-10
+                            new_state[idx_i] += sep * nx
+                            new_state[idx_i + 1] += sep * ny
+                            new_state[idx_j] -= sep * nx
+                            new_state[idx_j + 1] -= sep * ny
 
                 elif etype == "tighten":
                     edge = ed["edge"]

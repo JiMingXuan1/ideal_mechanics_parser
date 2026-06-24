@@ -70,7 +70,7 @@ eb.on('HOVER', ({ id }) => { sm.hoveredEntityId = id; });
 eb.on('ADD_ENTITY', (data) => {
   const { type, x, y } = data;
   const id = uid('n');
-  const entity = { id, type, x, y, vx: data.vx || 0, vy: data.vy || 0, params: { m: 1.0 } };
+  const entity = { id, type, x, y, vx: data.vx || 0, vy: data.vy || 0, params: { m: 1.0, radius: 0.1 } };
   if (type === 'RigidBody') {
     entity.theta = data.theta || 0;
     entity.omega = data.omega || 0;
@@ -146,6 +146,34 @@ eb.on('EDGE_END', ({ fromId, toId }) => {
 
 // --- Streaming + Playback ---
 
+function _topologyHasEvents(topology) {
+  for (const n of topology.nodes) {
+    if (n.params?.radius > 0) return true;
+  }
+  for (const e of topology.edges) {
+    if (e.type === 'SoftRope') return true;
+  }
+  return false;
+}
+
+function _startPlayback() {
+  if (sm._playTimer) return;
+  sm._playStart = performance.now();
+  const tick = () => {
+    if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
+    if (sm.isPlaying) {
+      const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
+      const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
+      sm.playhead = Math.min(elapsed, latest);
+      setStatus(`<span class="highlight">▶</span> t = ${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`);
+    } else {
+      setStatus(`<span class="highlight">⏸</span> t = ${sm.playhead.toFixed(2)}s / ${sm.trajectory.t[sm.trajectory.t.length-1].toFixed(1)}s`);
+    }
+    sm._playTimer = requestAnimationFrame(tick);
+  };
+  sm._playTimer = requestAnimationFrame(tick);
+}
+
 function _emitSimState() {
   if (sm.mode !== 'simulation') { eb.emit('SIM_STATE', 'stopped'); return; }
   eb.emit('SIM_STATE', sm.isPlaying ? 'playing' : 'paused');
@@ -181,6 +209,24 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
   sm._pausedAt = 0;
   _emitSimState();
 
+  const hasEvents = _topologyHasEvents(topology);
+  if (hasEvents) {
+    setStatus('Computing <span class="highlight">collision</span>...');
+    apiClient.solve(topology).then((data) => {
+      if (sm.mode !== 'simulation') return;
+      sm.trajectory = data;
+      setStatus(`<span class="highlight">▶</span> t = 0.0s / ${(data.t[data.t.length-1] || 0).toFixed(1)}s`);
+      _startPlayback(data);
+    }).catch((err) => {
+      sm.mode = 'edit';
+      eb.emit('CONSOLE_LOG', { level: 'error', text: `Backend: ${err.message}` });
+      setStatus('Error — check console');
+      _emitSimState();
+    });
+    return;
+  }
+
+  // Streaming mode (no events)
   const allT = [], allQ = [];
 
   setStatus('Connecting to backend...');
@@ -199,22 +245,7 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
     allQ.push(...chunk.q);
     sm.trajectory = { t: allT, q: allQ, node_order: chunk.node_order };
 
-    if (!sm._playTimer) {
-      sm._playStart = performance.now();
-      const tick = () => {
-        if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
-        if (sm.isPlaying) {
-          const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
-          const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
-          sm.playhead = Math.min(elapsed, latest);
-          setStatus(`<span class="highlight">▶</span> t = ${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`);
-        } else {
-          setStatus(`<span class="highlight">⏸</span> t = ${sm.playhead.toFixed(2)}s / ${sm.trajectory.t[sm.trajectory.t.length-1].toFixed(1)}s`);
-        }
-        sm._playTimer = requestAnimationFrame(tick);
-      };
-      sm._playTimer = requestAnimationFrame(tick);
-    }
+    if (!sm._playTimer) _startPlayback();
   }).catch((err) => {
     if (sm.mode !== 'simulation') return;
     sm.mode = 'edit';

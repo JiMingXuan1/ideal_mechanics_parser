@@ -62,6 +62,7 @@ export class PropertiesPanel {
       });
     } else if (entity.type === 'MassPoint') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
+      this._inp('radius', entity.params.radius || 0.1, (v) => { entity.params.radius = v; });
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('vx', entity.vx || 0, (v) => { entity.vx = v; });

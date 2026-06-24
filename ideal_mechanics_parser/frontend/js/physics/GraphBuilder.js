@@ -46,7 +46,7 @@ export class GraphBuilder {
           },
         });
       } else {
-        const params = { m: this._n(entity.params.m, 1) };
+        const params = { m: this._n(entity.params.m, 1), radius: this._n(entity.params.radius, 0.1) };
         if (entity.params?.external_force_x_expr) params.external_force_x_expr = entity.params.external_force_x_expr;
         if (entity.params?.external_force_y_expr) params.external_force_y_expr = entity.params.external_force_y_expr;
         nodes.push({
