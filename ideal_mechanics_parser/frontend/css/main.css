@@ -239,3 +239,25 @@ canvas {
   color: #333;
   font-size: 12px;
 }
+
+.prop-sep {
+  font-size: 11px;
+  color: #959da5;
+  margin: 10px 0 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e1e4e8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.expr-row label {
+  color: #8250df;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.expr-row input {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  background: #faf8ff;
+}

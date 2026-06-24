@@ -14,7 +14,12 @@ export class GraphBuilder {
     const nodes = [];
     for (const [id, entity] of this.sm.entities) {
       if (entity.type === 'Anchor') {
-        nodes.push({ id, type: 'Anchor', init_pos: [entity.x, entity.y] });
+        const params = {};
+        if (entity.params?.x_expr) params.x_expr = entity.params.x_expr;
+        if (entity.params?.y_expr) params.y_expr = entity.params.y_expr;
+        const n = { id, type: 'Anchor', init_pos: [entity.x, entity.y] };
+        if (Object.keys(params).length) n.params = params;
+        nodes.push(n);
       } else if (entity.type === 'RigidBody') {
         nodes.push({
           id, type: 'RigidBody',
@@ -25,9 +30,12 @@ export class GraphBuilder {
           },
         });
       } else {
+        const params = { m: entity.params.m || 1.0 };
+        if (entity.params?.external_force_x_expr) params.external_force_x_expr = entity.params.external_force_x_expr;
+        if (entity.params?.external_force_y_expr) params.external_force_y_expr = entity.params.external_force_y_expr;
         nodes.push({
           id, type: 'MassPoint',
-          params: { m: entity.params.m || 1.0 },
+          params,
           init_state: {
             x: entity.x, y: entity.y,
             vx: entity.vx || 0, vy: entity.vy || 0,

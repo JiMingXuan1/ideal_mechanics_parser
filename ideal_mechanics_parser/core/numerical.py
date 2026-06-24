@@ -8,7 +8,7 @@ class NumericalIntegrator:
     BAUMGARTE_ALPHA = 1.0
     BAUMGARTE_BETA = 1.0
 
-    def __init__(self, L, q, qd, holonomic_constraints, sm):
+    def __init__(self, L, q, qd, holonomic_constraints, sm, external_forces=None):
         self.sm = sm
         self.nq = len(q)
         self.nc = len(holonomic_constraints)
@@ -20,31 +20,52 @@ class NumericalIntegrator:
         F_full_sym = self.LM.forcing_full
 
         t_sym = sm.t
-        M_args = tuple(q)
+        self._M_has_t = M_full_sym.has(t_sym)
+        M_args = tuple(q) + (t_sym,) if self._M_has_t else tuple(q)
         F_args = tuple(q + qd + [t_sym])
 
         self.M_full_func = sp.lambdify(M_args, M_full_sym, modules="numpy")
         self.F_full_func = sp.lambdify(F_args, F_full_sym, modules="numpy")
 
+        self._con_has_t = False
         if self.nc > 0:
             f_sym = sp.Matrix(holonomic_constraints)
             J_sym = f_sym.jacobian(q)
-            self.J_func = sp.lambdify(tuple(q), J_sym, modules="numpy")
-            self.f_func = sp.lambdify(tuple(q), f_sym, modules="numpy")
+            # Check if constraints depend on time t
+            self._con_has_t = any(f.has(t_sym) for f in holonomic_constraints)
+            con_args = tuple(q) + (t_sym,) if self._con_has_t else tuple(q)
+            self.J_func = sp.lambdify(con_args, J_sym, modules="numpy")
+            self.f_func = sp.lambdify(con_args, f_sym, modules="numpy")
         else:
             self.J_func = None
             self.f_func = None
+
+        # External generalized forces: list of (coord_index, sympy_expression)
+        if external_forces:
+            self._ext_force_funcs = []
+            for idx, expr in external_forces:
+                f = sp.lambdify((t_sym,), expr, modules="numpy")
+                self._ext_force_funcs.append((idx, f))
+        else:
+            self._ext_force_funcs = None
 
     def rhs(self, t, state):
         q = state[:self.nq]
         qd = state[self.nq:]
 
-        M_full = np.asarray(self.M_full_func(*q))
+        M_args = list(q) + [t] if self._M_has_t else list(q)
+        M_full = np.asarray(self.M_full_func(*M_args))
         F_full = np.asarray(self.F_full_func(*(list(q) + list(qd) + [t]))).ravel()
 
+        # Add external generalized forces to the nq dynamic rows
+        if self._ext_force_funcs:
+            for idx, f_func in self._ext_force_funcs:
+                F_full[self.nq + idx] += float(f_func(t))
+
         if self.nc > 0:
-            J_val = np.asarray(self.J_func(*q))
-            f_val = np.asarray(self.f_func(*q)).ravel()
+            con_args = list(q) + [t] if self._con_has_t else list(q)
+            J_val = np.asarray(self.J_func(*con_args))
+            f_val = np.asarray(self.f_func(*con_args)).ravel()
             f_dot = J_val @ qd
             cons_start = 2 * self.nq
             F_full[cons_start:] = F_full[cons_start:] - 2.0 * self.BAUMGARTE_ALPHA * f_dot - self.BAUMGARTE_BETA**2 * f_val
@@ -74,10 +95,6 @@ class NumericalIntegrator:
         return result.t, result.y[:self.nq].T, result.y[self.nq:].T
 
     def integrate_events(self, q0, qd0, t_span, method="Radau", atol=1e-10, rtol=1e-10, events=None):
-        """Integrate with events, no fixed t_eval.
-
-        Returns the raw solve_ivp result (t_events, y_events accessible).
-        """
         state0 = np.concatenate([q0, qd0])
 
         result = solve_ivp(

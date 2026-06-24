@@ -17,6 +17,7 @@ from entities.distance_sum import DistanceSum
 from entities.angle_constraint import AngleConstraint
 from entities.hinge_joint import HingeJoint
 from entities.soft_rope import SoftRope
+from safety.sympify_sandbox import safe_sympify
 
 
 class Engine:
@@ -62,6 +63,10 @@ class Engine:
                 p = MassPoint(node["id"], node.get("init_state"), node.get("params"))
                 p.m = float(node.get("params", {}).get("m", 1.0))
                 p.radius = float(node.get("params", {}).get("radius", 0.0))
+                p._fx_expr = node.get("params", {}).get("external_force_x_expr")
+                p._fy_expr = node.get("params", {}).get("external_force_y_expr")
+                if p._fx_expr or p._fy_expr:
+                    self._has_external_forces = True
                 self.sm.add_point(p)
                 self.points.append(p)
             elif ntype == "RigidBody":
@@ -86,7 +91,14 @@ class Engine:
             node_map[b.id] = b
         for n in self.topology["nodes"]:
             if n["type"] == "Anchor" and n["id"] not in node_map:
-                node_map[n["id"]] = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
+                params = n.get("params", {})
+                x_expr = params.get("x_expr")
+                y_expr = params.get("y_expr")
+                if x_expr or y_expr:
+                    node_map[n["id"]] = MovingAnchor(n["id"], x_expr, y_expr,
+                                                     n.get("init_pos", [0, 0]), self.sm)
+                else:
+                    node_map[n["id"]] = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
 
         for e in self.edges:
             e.from_node = node_map.get(e.from_id)
@@ -112,9 +124,16 @@ class Engine:
             if holonomic:
                 f_sym = sp.Matrix(holonomic)
                 J_sym = f_sym.jacobian(q)
-                f_func = sp.lambdify(tuple(q), f_sym, modules="numpy")
-                J_func = sp.lambdify(tuple(q), J_sym, modules="numpy")
-                q0 = project_initial_state(q0, qd0, f_func, J_func)
+                has_t = any(f.has(self.sm.t) for f in holonomic)
+                if has_t:
+                    proj_args = tuple(q) + (self.sm.t,)
+                    f_func = sp.lambdify(proj_args, f_sym, modules="numpy")
+                    J_func = sp.lambdify(proj_args, J_sym, modules="numpy")
+                    q0 = project_initial_state(q0, qd0, f_func, J_func, extra_args=(0.0,))
+                else:
+                    f_func = sp.lambdify(tuple(q), f_sym, modules="numpy")
+                    J_func = sp.lambdify(tuple(q), J_sym, modules="numpy")
+                    q0 = project_initial_state(q0, qd0, f_func, J_func)
 
         self.q0_projected = q0
         self.qd0 = qd0
@@ -129,13 +148,28 @@ class Engine:
     def _step4_constraints(self):
         self.holonomic = harvest_constraints(self.edges, self.sm)
 
+    def _build_external_forces(self):
+        """Build list of (coord_index, sympy_expr) for external generalized forces."""
+        forces = []
+        for p in self.points:
+            fx = getattr(p, "_fx_expr", None)
+            fy = getattr(p, "_fy_expr", None)
+            if fx:
+                expr = safe_sympify(fx, {"t": self.sm.t})
+                forces.append((self._body_dof_index(p), expr))
+            if fy:
+                expr = safe_sympify(fy, {"t": self.sm.t})
+                forces.append((self._body_dof_index(p) + 1, expr))
+        return forces
+
     def _step5_integrate(self):
         L = self.T - self.V
         q = self.sm.q
         qd = self.sm.qd
         env = self.topology["system_env"]
 
-        integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm)
+        ext_forces = self._build_external_forces()
+        integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm, external_forces=ext_forces)
 
         duration = float(env.get("duration", 10.0))
         time_step = float(env.get("time_step", 0.01))
@@ -161,7 +195,8 @@ class Engine:
         q = self.sm.q
         qd = self.sm.qd
         env = self.topology["system_env"]
-        integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm)
+        ext_forces = self._build_external_forces()
+        integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm, external_forces=ext_forces)
 
         dt = float(env.get("time_step", 0.01))
         duration = float(env.get("duration", 10.0))
@@ -404,8 +439,10 @@ class Engine:
         node_order = [p.id for p in self.points] + [b.id for b in self.rigid_bodies]
         body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
 
+        ext_forces = self._build_external_forces()
+
         while t_current < duration and mutation_count < max_mutations:
-            integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm)
+            integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm, external_forces=ext_forces)
 
             event_funcs = [ed["func"] for ed in all_event_defs]
 
@@ -573,6 +610,26 @@ class Engine:
             else:
                 new_edges.append(e)
         self.edges = new_edges
+
+
+class MovingAnchor:
+    """An anchor whose position is a time-varying sympy expression.
+
+    Used for non-holonomic constraints like 'x_expr': '0.5 * 2 * t**2'.
+    """
+    def __init__(self, id, x_expr_str, y_expr_str, init_pos, sm):
+        self.id = id
+        local_vars = {"t": sm.t}
+        if x_expr_str:
+            self.x_sym = safe_sympify(x_expr_str, local_vars)
+        else:
+            self.x_sym = float(init_pos[0])
+        if y_expr_str:
+            self.y_sym = safe_sympify(y_expr_str, local_vars)
+        else:
+            self.y_sym = float(init_pos[1])
+        self.vx_sym = 0.0
+        self.vy_sym = 0.0
 
 
 class AnchorLike:

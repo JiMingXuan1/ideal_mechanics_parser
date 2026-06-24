@@ -1,6 +1,6 @@
 const EDGE_FIELDS = {
   IdealRod: ['length'],
-  HingeJoint: ['pivot', 'world'],
+  HingeJoint: ['pivot', 'world', 'pivot_b'],
   IdealSpring: ['k', 'l0'],
   SmoothRail: ['expr'],
   FixedCoordinate: [
@@ -52,12 +52,29 @@ export class PropertiesPanel {
     if (entity.type === 'Anchor') {
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
+      this._expr('x_expr', entity.params?.x_expr || '', (v) => {
+        if (!entity.params) entity.params = {};
+        entity.params.x_expr = v;
+      });
+      this._expr('y_expr', entity.params?.y_expr || '', (v) => {
+        if (!entity.params) entity.params = {};
+        entity.params.y_expr = v;
+      });
     } else if (entity.type === 'MassPoint') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('vx', entity.vx || 0, (v) => { entity.vx = v; });
       this._inp('vy', entity.vy || 0, (v) => { entity.vy = v; });
+      this._sep('External Forces (optional)');
+      this._expr('Fx(t)', entity.params?.external_force_x_expr || '', (v) => {
+        if (!entity.params) entity.params = {};
+        entity.params.external_force_x_expr = v || undefined;
+      });
+      this._expr('Fy(t)', entity.params?.external_force_y_expr || '', (v) => {
+        if (!entity.params) entity.params = {};
+        entity.params.external_force_y_expr = v || undefined;
+      });
     } else if (entity.type === 'RigidBody') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
       this._inp('I', entity.params.I || 0.0, (v) => { entity.params.I = v; });
@@ -73,7 +90,7 @@ export class PropertiesPanel {
   _renderEdge(edge) {
     this._row('ID', edge.id);
     this._sel('Type', edge.type,
-      ['IdealRod', 'IdealSpring', 'SmoothRail', 'FixedCoordinate', 'LinearRelation', 'DistanceSum', 'AngleConstraint'],
+      ['IdealRod', 'IdealSpring', 'SmoothRail', 'FixedCoordinate', 'LinearRelation', 'DistanceSum', 'AngleConstraint', 'HingeJoint', 'SoftRope'],
       (nv) => {
         edge.type = nv;
         edge.params = {};
@@ -108,6 +125,13 @@ export class PropertiesPanel {
     this._body.appendChild(d);
   }
 
+  _sep(text) {
+    const d = document.createElement('div');
+    d.className = 'prop-sep';
+    d.textContent = text;
+    this._body.appendChild(d);
+  }
+
   _inp(key, value, onChange) {
     const d = document.createElement('div');
     d.className = 'prop-row';
@@ -117,6 +141,17 @@ export class PropertiesPanel {
       const raw = inp.value;
       const n = parseFloat(raw);
       onChange(isNaN(n) ? raw : n);
+    });
+    this._body.appendChild(d);
+  }
+
+  _expr(key, value, onChange) {
+    const d = document.createElement('div');
+    d.className = 'prop-row expr-row';
+    d.innerHTML = `<label>ƒ ${key}</label><input type="text" value="${value || ''}" placeholder="5*sin(2*pi*t)" />`;
+    const inp = d.querySelector('input');
+    inp.addEventListener('input', () => {
+      onChange(inp.value || undefined);
     });
     this._body.appendChild(d);
   }
