@@ -249,8 +249,6 @@ class Engine:
 
         idx_a = self._body_dof_index(body_a)
         idx_b = self._body_dof_index(body_b)
-        dof_a = 3 if hasattr(body_a, "theta_sym") and body_a.theta_sym is not None else 2
-        dof_b = 3 if hasattr(body_b, "theta_sym") and body_b.theta_sym is not None else 2
         r_a = getattr(body_a, "radius", 0.0)
         r_b = getattr(body_b, "radius", 0.0)
 
@@ -262,7 +260,8 @@ class Engine:
             dx = ax - bx
             dy = ay - by
             return np.sqrt(dx * dx + dy * dy) - (r_a + r_b)
-
+        event.terminal = True
+        event.direction = -1
         return event
 
     def _find_body(self, body_id):
@@ -340,6 +339,7 @@ class Engine:
                         dx = state[idx_i] - ax
                         dy = state[idx_i + 1] - ay
                         return np.sqrt(dx * dx + dy * dy) - (bi_r + anchor_r)
+                    event.terminal = True
                     event.direction = -1
                     return event
 
@@ -376,7 +376,7 @@ class Engine:
                     dx = state[idx_a] - state[idx_b]
                     dy = state[idx_a + 1] - state[idx_b + 1]
                     return np.sqrt(dx * dx + dy * dy) - length
-                # Tighten: goes from slack (neg) to tight (zero → pos) → direction +1
+                event.terminal = True
                 event.direction = +1
                 return event
 
@@ -385,7 +385,7 @@ class Engine:
                     dx = state[idx_a] - state[idx_b]
                     dy = state[idx_a + 1] - state[idx_b + 1]
                     return np.sqrt(dx * dx + dy * dy) - length
-                # Slacken: goes from tight (pos) to slack (zero → neg) → direction -1
+                event.terminal = True
                 event.direction = -1
                 return event
 
