@@ -31,7 +31,13 @@ export class GraphBuilder {
       } else if (entity.type === 'RigidBody') {
         nodes.push({
           id, type: 'RigidBody',
-          params: { m: this._n(entity.params.m, 1), I: this._n(entity.params.I) },
+          params: {
+            m: this._n(entity.params.m, 1),
+            I: this._n(entity.params.I),
+            shape: entity.params.shape || 'rect',
+            length: this._n(entity.params.length, 2),
+            width: this._n(entity.params.width, 0.5),
+          },
           init_state: {
             x: this._n(entity.x), y: this._n(entity.y),
             theta: this._n(entity.theta),

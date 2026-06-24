@@ -78,6 +78,9 @@ export class PropertiesPanel {
     } else if (entity.type === 'RigidBody') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
       this._inp('I', entity.params.I || 0.0, (v) => { entity.params.I = v; });
+      this._sel('shape', entity.params.shape || 'rect', ['rect', 'rod'], (v) => { entity.params.shape = v; });
+      this._inp('length', entity.params.length || 2.0, (v) => { entity.params.length = v; });
+      this._inp('width', entity.params.width || 0.5, (v) => { entity.params.width = v; });
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('theta', entity.theta || 0, (v) => { entity.theta = v; });

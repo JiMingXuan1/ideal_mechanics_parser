@@ -74,7 +74,7 @@ eb.on('ADD_ENTITY', (data) => {
   if (type === 'RigidBody') {
     entity.theta = data.theta || 0;
     entity.omega = data.omega || 0;
-    entity.params = data.params || { m: 1.0, I: 0.167 };
+    entity.params = data.params || { m: 1.0, I: 0.167, shape: 'rect', length: 2, width: 0.5 };
   }
   sm.addEntity(entity);
   history.push({ undo: () => sm.removeEntity(id), redo: () => sm.addEntity({ ...entity }) });
