@@ -5,7 +5,7 @@ VALID_NODE_TYPES = {"Anchor", "MassPoint", "RigidBody"}
 VALID_EDGE_TYPES = {
     "IdealRod", "IdealSpring", "SmoothRail",
     "FixedCoordinate", "LinearRelation", "DistanceSum", "AngleConstraint",
-    "HingeJoint",
+    "HingeJoint", "SoftRope",
 }
 
 def parse_json(filepath):

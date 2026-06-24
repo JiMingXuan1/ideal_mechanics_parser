@@ -16,6 +16,7 @@ from entities.linear_relation import LinearRelation
 from entities.distance_sum import DistanceSum
 from entities.angle_constraint import AngleConstraint
 from entities.hinge_joint import HingeJoint
+from entities.soft_rope import SoftRope
 
 
 class Engine:
@@ -36,6 +37,7 @@ class Engine:
         "DistanceSum": DistanceSum,
         "AngleConstraint": AngleConstraint,
         "HingeJoint": HingeJoint,
+        "SoftRope": SoftRope,
     }
 
     def __init__(self, topology):
@@ -59,12 +61,14 @@ class Engine:
             if ntype == "MassPoint":
                 p = MassPoint(node["id"], node.get("init_state"), node.get("params"))
                 p.m = float(node.get("params", {}).get("m", 1.0))
+                p.radius = float(node.get("params", {}).get("radius", 0.0))
                 self.sm.add_point(p)
                 self.points.append(p)
             elif ntype == "RigidBody":
                 b = RigidBody(node["id"], node.get("init_state"), node.get("params"))
                 b.m = float(node.get("params", {}).get("m", 1.0))
                 b.I = float(node.get("params", {}).get("I", 0.0))
+                b.radius = float(node.get("params", {}).get("radius", 0.0))
                 self.sm.add_rigid_body(b)
                 self.rigid_bodies.append(b)
 
@@ -193,6 +197,382 @@ class Engine:
                 chunk["body_dofs"] = body_dofs
             on_chunk(chunk)
             seg_start = seg_end
+
+    # ─── Event-Driven Methods ──────────────────────────────────────────
+
+    def _event_func_from_state(self, body_id_a, body_id_b):
+        """Return a closure thatsolve_ivp can call as event(t, state).
+
+        Returns the signed distance between two bodies' surfaces:
+            gap = ||p_a - p_b|| - (r_a + r_b)
+        """
+        body_a = self._find_body(body_id_a)
+        body_b = self._find_body(body_id_b)
+        if body_a is None or body_b is None:
+            return None
+
+        idx_a = self._body_dof_index(body_a)
+        idx_b = self._body_dof_index(body_b)
+        dof_a = 3 if hasattr(body_a, "theta_sym") and body_a.theta_sym is not None else 2
+        dof_b = 3 if hasattr(body_b, "theta_sym") and body_b.theta_sym is not None else 2
+        r_a = getattr(body_a, "radius", 0.0)
+        r_b = getattr(body_b, "radius", 0.0)
+
+        def event(t, state):
+            ax = state[idx_a]
+            ay = state[idx_a + 1]
+            bx = state[idx_b]
+            by = state[idx_b + 1]
+            dx = ax - bx
+            dy = ay - by
+            return np.sqrt(dx * dx + dy * dy) - (r_a + r_b)
+
+        return event
+
+    def _find_body(self, body_id):
+        for p in self.points:
+            if p.id == body_id:
+                return p
+        for b in self.rigid_bodies:
+            if b.id == body_id:
+                return b
+        return None
+
+    def _body_dof_index(self, body):
+        if hasattr(body, "idx") and body.idx is not None:
+            if hasattr(body, "theta_sym") and body.theta_sym is not None:
+                return 2 * len(self.points) + 3 * body.idx
+            else:
+                return 2 * body.idx
+        return 0
+
+    def _build_collision_events(self):
+        """Build event dicts for all pairs of bodies with radius > 0.
+
+        Includes dynamic bodies (MassPoint, RigidBody) and static anchors
+        that have radius > 0.
+        """
+        restitution = float(self.topology.get("system_env", {}).get("restitution", 1.0))
+        all_bodies = self.points + self.rigid_bodies
+        bodies_with_radius = [b for b in all_bodies
+                              if getattr(b, "radius", 0.0) > 0 and b.id is not None]
+
+        # Collect anchors with radius from topology
+        anchor_radius = {}
+        for n in self.topology.get("nodes", []):
+            if n["type"] == "Anchor":
+                r = float(n.get("params", {}).get("radius", 0.0))
+                if r > 0:
+                    anchor_radius[n["id"]] = r
+
+        events = []
+        for i in range(len(bodies_with_radius)):
+            for j in range(i + 1, len(bodies_with_radius)):
+                bi = bodies_with_radius[i]
+                bj = bodies_with_radius[j]
+                event_func = self._event_func_from_state(bi.id, bj.id)
+                if event_func is None:
+                    continue
+                events.append({
+                    "name": f"collision_{bi.id}_{bj.id}",
+                    "func": event_func,
+                    "terminal": True,
+                    "direction": -1,
+                    "type": "collision",
+                    "body_i": bi,
+                    "body_j": bj,
+                    "restitution": restitution,
+                })
+
+            # Dynamic body vs anchor
+            for anchor_id, anchor_r in anchor_radius.items():
+                bi = bodies_with_radius[i]
+                anchor_node = None
+                for n in self.topology.get("nodes", []):
+                    if n["id"] == anchor_id:
+                        anchor_node = n
+                        break
+                if anchor_node is None:
+                    continue
+                ax = float(anchor_node.get("init_pos", [0, 0])[0])
+                ay = float(anchor_node.get("init_pos", [0, 0])[1])
+                idx_i = self._body_dof_index(bi)
+                bi_r = getattr(bi, "radius", 0.0)
+
+                def make_anchor_event(idx_i, ax, ay, bi_r, anchor_r):
+                    def event(t, state):
+                        dx = state[idx_i] - ax
+                        dy = state[idx_i + 1] - ay
+                        return np.sqrt(dx * dx + dy * dy) - (bi_r + anchor_r)
+                    event.direction = -1
+                    return event
+
+                events.append({
+                    "name": f"collision_{bi.id}_{anchor_id}",
+                    "func": make_anchor_event(idx_i, ax, ay, bi_r, anchor_r),
+                    "terminal": True,
+                    "direction": -1,
+                    "type": "collision",
+                    "body_i": bi,
+                    "body_j": None,
+                    "_anchor_x": ax,
+                    "_anchor_y": ay,
+                    "restitution": restitution,
+                })
+        return events
+
+    def _build_soft_rope_events(self):
+        events = []
+        for e in self.edges:
+            if e.type != "SoftRope":
+                continue
+            a = e.from_node
+            b = e.to_node
+            if a is None or b is None:
+                continue
+
+            idx_a = self._body_dof_index(a)
+            idx_b = self._body_dof_index(b)
+
+            def make_tighten_event(idx_a, idx_b, length):
+                def event(t, state):
+                    dx = state[idx_a] - state[idx_b]
+                    dy = state[idx_a + 1] - state[idx_b + 1]
+                    return np.sqrt(dx * dx + dy * dy) - length
+                # Tighten: goes from slack (neg) to tight (zero → pos) → direction +1
+                event.direction = +1
+                return event
+
+            def make_slacken_event(idx_a, idx_b, length):
+                def event(t, state):
+                    dx = state[idx_a] - state[idx_b]
+                    dy = state[idx_a + 1] - state[idx_b + 1]
+                    return np.sqrt(dx * dx + dy * dy) - length
+                # Slacken: goes from tight (pos) to slack (zero → neg) → direction -1
+                event.direction = -1
+                return event
+
+            events.append({
+                "name": f"tighten_{e.id}",
+                "func": make_tighten_event(idx_a, idx_b, e.length),
+                "terminal": True,
+                "direction": -1,
+                "type": "tighten",
+                "edge": e,
+            })
+            events.append({
+                "name": f"slacken_{e.id}",
+                "func": make_slacken_event(idx_a, idx_b, e.length),
+                "terminal": True,
+                "direction": +1,
+                "type": "slacken",
+                "edge": e,
+            })
+        return events
+
+    def run_events(self, on_chunk):
+        """Event-driven simulation with interrupt-restart loop.
+
+        Uses dual-mode: if no events are needed, falls through to run_stream.
+        Otherwise uses batch-mode interrupt loop.
+        """
+        self._step1_instantiate()
+        self._step2_project()
+        self._step3_energy()
+        self._step4_constraints()
+
+        # Check if any events are needed
+        collision_events = self._build_collision_events()
+        soft_rope_events = self._build_soft_rope_events()
+        all_event_defs = collision_events + soft_rope_events
+
+        if not all_event_defs:
+            self.run_stream(on_chunk)
+            return
+
+        L = self.T - self.V
+        q = self.sm.q
+        qd = self.sm.qd
+        env = self.topology["system_env"]
+
+        duration = float(env.get("duration", 10.0))
+        max_mutations = int(env.get("max_mutations", 100))
+        t_current = 0.0
+        state = np.concatenate([self.q0_projected, self.qd0])
+        mutation_count = 0
+        nq = self.sm.nq
+        node_order = [p.id for p in self.points] + [b.id for b in self.rigid_bodies]
+        body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
+
+        while t_current < duration and mutation_count < max_mutations:
+            integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm)
+
+            event_funcs = [ed["func"] for ed in all_event_defs]
+
+            result = integrator.integrate_events(
+                state[:nq], state[nq:], [t_current, duration],
+                events=event_funcs,
+            )
+
+            any_triggered = (hasattr(result, "t_events")
+                             and result.t_events is not None
+                             and any(len(te) > 0 for te in result.t_events))
+
+            if any_triggered:
+                t_event = None
+                first_idx = -1
+                for ei, te_list in enumerate(result.t_events):
+                    if len(te_list) > 0:
+                        te = te_list[0]
+                        if t_event is None or te < t_event:
+                            t_event = te
+                            first_idx = ei
+
+                state_event = result.y_events[first_idx][0]
+                ed = all_event_defs[first_idx]
+                etype = ed["type"]
+
+                new_state = state_event.copy()
+                topology_change = False
+
+                if etype == "collision":
+                    bi = ed["body_i"]
+                    bj = ed["body_j"]
+                    idx_i = self._body_dof_index(bi)
+
+                    nq_snap = nq
+                    xi = new_state[idx_i]
+                    yi = new_state[idx_i + 1]
+
+                    if bj is None:
+                        # Anchor collision: infinite mass, reverse velocity
+                        vxi = new_state[nq_snap + idx_i]
+                        vyi = new_state[nq_snap + idx_i + 1]
+
+                        dx = xi - (ed.get("_anchor_x", xi + 1))
+                        dy = yi - (ed.get("_anchor_y", yi + 1))
+                        dist = np.sqrt(dx * dx + dy * dy)
+                        if dist < 1e-15:
+                            dist = 1e-15
+                        nx = dx / dist
+                        ny = dy / dist
+
+                        vn = vxi * nx + vyi * ny
+                        if vn < 0:
+                            e = float(ed.get("restitution", 1.0))
+                            new_state[nq_snap + idx_i] -= (1 + e) * vn * nx
+                            new_state[nq_snap + idx_i + 1] -= (1 + e) * vn * ny
+                    else:
+                        idx_j = self._body_dof_index(bj)
+                        xj = new_state[idx_j]
+                        yj = new_state[idx_j + 1]
+                        dx = xi - xj
+                        dy = yi - yj
+                        dist = np.sqrt(dx * dx + dy * dy)
+                        if dist < 1e-15:
+                            dist = 1e-15
+                        nx = dx / dist
+                        ny = dy / dist
+
+                        vxi = new_state[nq_snap + idx_i]
+                        vyi = new_state[nq_snap + idx_i + 1]
+                        vxj = new_state[nq_snap + idx_j]
+                        vyj = new_state[nq_snap + idx_j + 1]
+                        vrel = nx * (vxi - vxj) + ny * (vyi - vyj)
+                        if vrel < 0:
+                            mi = bi.m
+                            mj = bj.m
+                            e_restitution = float(ed.get("restitution", 1.0))
+                            impulse = -(1.0 + e_restitution) * vrel / (1.0 / mi + 1.0 / mj)
+
+                            new_state[nq_snap + idx_i] += impulse / mi * nx
+                            new_state[nq_snap + idx_i + 1] += impulse / mi * ny
+                            new_state[nq_snap + idx_j] -= impulse / mj * nx
+                            new_state[nq_snap + idx_j + 1] -= impulse / mj * ny
+
+                elif etype == "tighten":
+                    edge = ed["edge"]
+                    if getattr(edge, "_tight", False):
+                        pass
+                    else:
+                        edge._tight = True
+                        topology_change = True
+                        # Perfectly inelastic tightening: cancel relative velocity along rope
+                        nq_snap = nq
+                        a = edge.from_node
+                        b = edge.to_node
+                        ia = self._body_dof_index(a)
+                        ib = self._body_dof_index(b)
+                        dx = new_state[ia] - new_state[ib]
+                        dy = new_state[ia + 1] - new_state[ib + 1]
+                        d = np.sqrt(dx * dx + dy * dy) + 1e-15
+                        nx, ny = dx / d, dy / d
+                        dv = nx * (new_state[nq_snap + ia] - new_state[nq_snap + ib]) + ny * (new_state[nq_snap + ia + 1] - new_state[nq_snap + ib + 1])
+                        ma, mb = a.m, b.m
+                        if dv > 0 and ma > 0 and mb > 0:
+                            impulse = dv / (1.0 / ma + 1.0 / mb)
+                            new_state[nq_snap + ia] -= impulse / ma * nx
+                            new_state[nq_snap + ia + 1] -= impulse / ma * ny
+                            new_state[nq_snap + ib] += impulse / mb * nx
+                            new_state[nq_snap + ib + 1] += impulse / mb * ny
+
+                elif etype == "slacken":
+                    edge = ed["edge"]
+                    if hasattr(edge, "_tight") and edge._tight:
+                        edge._tight = False
+                        topology_change = True
+
+                if topology_change:
+                    self._apply_soft_rope_constraints()
+                    self._step3_energy()
+                    self._step4_constraints()
+                    L = self.T - self.V
+                    nq = self.sm.nq
+                    state = new_state
+                    collision_events = self._build_collision_events()
+                    soft_rope_events = self._build_soft_rope_events()
+                    all_event_defs = collision_events + soft_rope_events
+                else:
+                    state = new_state
+
+                mutation_count += 1
+                on_chunk({
+                    "t_event": float(t_event),
+                    "event": ed["name"],
+                    "type": etype,
+                    "complete": False,
+                })
+                t_current = float(t_event)
+            else:
+                on_chunk({
+                    "t": result.t.tolist(),
+                    "q": result.y[:nq].T.tolist(),
+                    "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
+                    "node_order": node_order,
+                    "complete": True,
+                })
+                break
+
+        if mutation_count >= max_mutations:
+            on_chunk({"error": "Max mutations exceeded", "complete": True})
+
+    def _apply_soft_rope_constraints(self):
+        """Replace SoftRope edges with IdealRod or remove them based on _tight state.
+
+        Mutates self.edges in-place without touching self.topology or re-instantiating.
+        """
+        new_edges = []
+        for e in self.edges:
+            if e.type == "SoftRope":
+                if getattr(e, "_tight", False):
+                    rod = IdealRod(e.id, e.from_id, e.to_id, {"length": e.length})
+                    rod.from_node = e.from_node
+                    rod.to_node = e.to_node
+                    new_edges.append(rod)
+                # slack: no constraint contributed
+            else:
+                new_edges.append(e)
+        self.edges = new_edges
 
 
 class AnchorLike:

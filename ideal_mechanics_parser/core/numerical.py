@@ -29,10 +29,8 @@ class NumericalIntegrator:
         if self.nc > 0:
             f_sym = sp.Matrix(holonomic_constraints)
             J_sym = f_sym.jacobian(q)
-            J_args = tuple(q)
-            f_args = tuple(q)
-            self.J_func = sp.lambdify(J_args, J_sym, modules="numpy")
-            self.f_func = sp.lambdify(f_args, f_sym, modules="numpy")
+            self.J_func = sp.lambdify(tuple(q), J_sym, modules="numpy")
+            self.f_func = sp.lambdify(tuple(q), f_sym, modules="numpy")
         else:
             self.J_func = None
             self.f_func = None
@@ -65,6 +63,7 @@ class NumericalIntegrator:
             state0,
             method=method,
             t_eval=t_eval,
+            events=None,
             atol=atol,
             rtol=rtol,
         )
@@ -73,3 +72,23 @@ class NumericalIntegrator:
             raise RuntimeError(f"Integration failed: {result.message}")
 
         return result.t, result.y[:self.nq].T, result.y[self.nq:].T
+
+    def integrate_events(self, q0, qd0, t_span, method="Radau", atol=1e-10, rtol=1e-10, events=None):
+        """Integrate with events, no fixed t_eval.
+
+        Returns the raw solve_ivp result (t_events, y_events accessible).
+        """
+        state0 = np.concatenate([q0, qd0])
+
+        result = solve_ivp(
+            self.rhs,
+            t_span,
+            state0,
+            method=method,
+            events=events,
+            atol=atol,
+            rtol=rtol,
+            max_step=0.1,
+        )
+
+        return result

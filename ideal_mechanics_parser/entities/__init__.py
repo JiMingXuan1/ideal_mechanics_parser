@@ -9,3 +9,4 @@ from .linear_relation import LinearRelation
 from .distance_sum import DistanceSum
 from .angle_constraint import AngleConstraint
 from .hinge_joint import HingeJoint
+from .soft_rope import SoftRope
