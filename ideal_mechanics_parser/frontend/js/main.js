@@ -159,8 +159,9 @@ function _topologyHasEvents(topology) {
 function _startPlayback() {
   if (sm._playTimer) return;
   const totalSimTime = sm.trajectory.t[sm.trajectory.t.length - 1] || 0;
-  const targetDuration = 15; // seconds of wall-time to play full sim
+  const targetDuration = 15;
   const speed = Math.max(1, totalSimTime / targetDuration);
+  let _lastStatus = '';
 
   sm._playStart = performance.now();
   const tick = () => {
@@ -170,7 +171,8 @@ function _startPlayback() {
       const elapsed = raw * speed;
       const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
       sm.playhead = Math.min(elapsed, latest);
-      setStatus(`<span class="highlight">▶</span> t = ${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`);
+      const s = `${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`;
+      if (s !== _lastStatus) { _lastStatus = s; setStatus(`<span class="highlight">▶</span> t = ${s}`); }
     } else {
       setStatus(`<span class="highlight">⏸</span> t = ${sm.playhead.toFixed(2)}s / ${sm.trajectory.t[sm.trajectory.t.length-1].toFixed(1)}s`);
     }
@@ -215,13 +217,13 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
   _emitSimState();
 
   const hasEvents = _topologyHasEvents(topology);
-  console.log('hasEvents:', hasEvents, 'radii:', topology.nodes.map(n=>n.params?.radius));
+
   if (hasEvents) {
     setStatus('Computing <span class="highlight">collision</span>...');
     apiClient.solve(topology).then((data) => {
       if (sm.mode !== 'simulation') return;
       sm.trajectory = data;
-      console.log("TRAJ", data.t?.length, "frames, first vx:", data.qd?.[0]?.[0], "last vx:", data.qd?.[data.qd.length-1]?.[0], "last 3 qd rows:", data.qd?.slice(-3));
+    
       setStatus(`<span class="highlight">▶</span> t = 0.0s / ${(data.t[data.t.length-1] || 0).toFixed(1)}s`);
       _startPlayback(data);
     }).catch((err) => {
