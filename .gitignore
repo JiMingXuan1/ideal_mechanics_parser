@@ -23,3 +23,5 @@ Thumbs.db
 # Project
 output/
 *.log
+
+out.txt
