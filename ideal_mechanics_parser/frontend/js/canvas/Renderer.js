@@ -109,6 +109,44 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  _drawPivots() {
+    const ctx = this.ctx;
+    for (const [id, edge] of this.sm.edges) {
+      const fromEnt = this.sm.getEntity(edge.from);
+      const fromPivot = edge.params?.from_pivot;
+      if (fromEnt && fromEnt.type === 'RigidBody' && fromPivot) {
+        const theta = fromEnt.theta || 0;
+        const ct = Math.cos(theta), st = Math.sin(theta);
+        const wx = fromEnt.x + fromPivot[0] * ct - fromPivot[1] * st;
+        const wy = fromEnt.y + fromPivot[0] * st + fromPivot[1] * ct;
+        const s = this.camera.worldToScreen(wx, wy);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#8250df';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      const toPivot = edge.params?.to_pivot;
+      const toEnt = edge.to && this.sm.getEntity(edge.to);
+      if (toEnt && toEnt.type === 'RigidBody' && toPivot) {
+        const theta = toEnt.theta || 0;
+        const ct = Math.cos(theta), st = Math.sin(theta);
+        const wx = toEnt.x + toPivot[0] * ct - toPivot[1] * st;
+        const wy = toEnt.y + toPivot[0] * st + toPivot[1] * ct;
+        const s = this.camera.worldToScreen(wx, wy);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#8250df';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
+
   _drawEntities() {
     const ctx = this.ctx;
     const sel = this.sm.selectedEntityIds;

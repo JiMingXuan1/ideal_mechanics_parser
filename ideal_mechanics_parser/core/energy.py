@@ -26,10 +26,13 @@ def assemble_energy(points, edges, env, sm, rigid_bodies=None):
 
     for e in edges:
         if e.type == "IdealSpring":
-            a = e.from_node
-            b = e.to_node
-            dx = a.x_sym - b.x_sym
-            dy = a.y_sym - b.y_sym
+            from core.constraints import _world_pivot
+            from_pivot = getattr(e, "from_pivot", None) or e.params.get("from_pivot")
+            to_pivot = getattr(e, "to_pivot", None) or e.params.get("to_pivot")
+            ax, ay = _world_pivot(e.from_node, from_pivot)
+            bx, by = _world_pivot(e.to_node, to_pivot)
+            dx = ax - bx
+            dy = ay - by
             dist_sq = dx**2 + dy**2
             V += sp.Rational(1, 2) * e.k * (sp.sqrt(dist_sq) - e.l0)**2
 

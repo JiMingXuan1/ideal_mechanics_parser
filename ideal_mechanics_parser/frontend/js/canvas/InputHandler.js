@@ -108,7 +108,7 @@ export class InputHandler {
       this.eb.emit('ADD_ENTITY', {
         type: 'RigidBody', x: world.x, y: world.y,
         theta: 0, vx: 0, vy: 0, omega: 0,
-        params: { m: 1.0, I: 0.167, shape: 'rect', length: 2, width: 0.5 },
+        params: { m: 1.0, shape: 'rect', length: 2, width: 0.5 },
       });
       return;
     }

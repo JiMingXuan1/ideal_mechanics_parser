@@ -2,7 +2,7 @@ import sympy as sp
 from safety.sympify_sandbox import safe_sympify
 
 
-def _world_pivot(body):
+def _world_pivot(body, pivot_offset=None):
     """Return symbolic (x, y) of body's pivot point in world coordinates.
 
     For a MassPoint pivot is just (x_sym, y_sym).
@@ -12,7 +12,7 @@ def _world_pivot(body):
     For an Anchor, (x_sym, y_sym) are static floats.
     """
     if hasattr(body, "theta_sym") and body.theta_sym is not None:
-        u, v = body.pivot_offset if hasattr(body, "pivot_offset") else (0.0, 0.0)
+        u, v = pivot_offset if pivot_offset is not None else (0.0, 0.0)
         ct = sp.cos(body.theta_sym)
         st = sp.sin(body.theta_sym)
         px = body.x_sym + u * ct - v * st
@@ -21,84 +21,91 @@ def _world_pivot(body):
     return body.x_sym, body.y_sym
 
 
+def _constraint_pair(e, sm):
+    """Resolve (px, py) for from_node and (qx, qy) for to_node
+    respecting RigidBody pivot offsets stored in edge params.
+    """
+    a = e.from_node
+    from_pivot = getattr(e, "from_pivot", None) or e.params.get("from_pivot")
+    a_px, a_py = _world_pivot(a, from_pivot)
+
+    if e.to_node is not None:
+        b = e.to_node
+        to_pivot = getattr(e, "to_pivot", None) or e.params.get("to_pivot")
+        b_px, b_py = _world_pivot(b, to_pivot)
+    else:
+        b_px = b_py = None
+
+    return (a_px, a_py), (b_px, b_py)
+
+
 def harvest_constraints(edges, sm):
     holonomic = []
 
     for e in edges:
+        (a_px, a_py), (b_px, b_py) = _constraint_pair(e, sm)
+
         if e.type == "IdealRod":
-            a = e.from_node
-            b = e.to_node
-            dx = a.x_sym - b.x_sym
-            dy = a.y_sym - b.y_sym
+            if b_px is None:
+                raise ValueError("IdealRod requires 'to' node")
+            dx = a_px - b_px
+            dy = a_py - b_py
             f = dx**2 + dy**2 - e.length**2
             holonomic.append(f)
 
         elif e.type == "SmoothRail":
-            p = e.from_node
-            local_vars = {"x": p.x_sym, "y": p.y_sym, "t": sm.t}
+            local_vars = {"x": a_px, "y": a_py, "t": sm.t}
             f = safe_sympify(e.expr_str, local_vars)
             holonomic.append(f)
 
         elif e.type == "FixedCoordinate":
-            p = e.from_node
             if e.coord == "x":
-                f = p.x_sym - e.value
+                f = a_px - e.value
             elif e.coord == "y":
-                f = p.y_sym - e.value
+                f = a_py - e.value
             else:
                 raise ValueError(f"Unknown coord '{e.coord}' in FixedCoordinate")
             holonomic.append(f)
 
         elif e.type == "LinearRelation":
             ca, cb, cc, cd = e.coeffs[:4]
-            if e.to_node is not None:
-                f = (ca * e.from_node.x_sym + cb * e.from_node.y_sym
-                     + cc * e.to_node.x_sym + cd * e.to_node.y_sym + e.constant)
+            if b_px is not None:
+                f = ca * a_px + cb * a_py + cc * b_px + cd * b_py + e.constant
             else:
-                f = ca * e.from_node.x_sym + cb * e.from_node.y_sym + e.constant
+                f = ca * a_px + cb * a_py + e.constant
             holonomic.append(f)
 
         elif e.type == "DistanceSum":
-            p1 = e.from_node
-            p2 = e.to_node
+            p1x, p1y = a_px, a_py
+            p2x, p2y = b_px, b_py
             if e.via_node is None:
                 raise ValueError("DistanceSum requires via_node to be resolved")
-            d1 = sp.sqrt((p1.x_sym - e.via_node.x_sym)**2 + (p1.y_sym - e.via_node.y_sym)**2)
-            d2 = sp.sqrt((p2.x_sym - e.via_node.x_sym)**2 + (p2.y_sym - e.via_node.y_sym)**2)
+            vx = e.via_node.x_sym if not hasattr(e.via_node, "theta_sym") or e.via_node.theta_sym is None \
+                 else _world_pivot(e.via_node, [0, 0])[0]
+            vy = e.via_node.y_sym if not hasattr(e.via_node, "theta_sym") or e.via_node.theta_sym is None \
+                 else _world_pivot(e.via_node, [0, 0])[1]
+            d1 = sp.sqrt((p1x - vx)**2 + (p1y - vy)**2)
+            d2 = sp.sqrt((p2x - vx)**2 + (p2y - vy)**2)
             f = d1 + d2 - e.length
             holonomic.append(f)
 
         elif e.type == "AngleConstraint":
-            p1 = e.from_node
-            p2 = e.to_node
+            if b_px is None:
+                raise ValueError("AngleConstraint requires 'to' node")
             sin_a = sp.sin(e.angle)
             cos_a = sp.cos(e.angle)
-            f = (p2.x_sym - p1.x_sym) * sin_a - (p2.y_sym - p1.y_sym) * cos_a
+            f = (b_px - a_px) * sin_a - (b_py - a_py) * cos_a
             holonomic.append(f)
 
         elif e.type == "HingeJoint":
-            a = e.from_node
-            if hasattr(a, "theta_sym") and a.theta_sym is not None:
-                a.pivot_offset = e.pivot
-                ax, ay = _world_pivot(a)
-            else:
-                ax, ay = a.x_sym, a.y_sym
-
             if e.world is not None:
-                fx = ax - float(e.world[0])
-                fy = ay - float(e.world[1])
-            elif e.to_node is not None:
-                b = e.to_node
-                if hasattr(b, "theta_sym") and b.theta_sym is not None:
-                    b.pivot_offset = e.pivot_b if e.pivot_b is not None else [0.0, 0.0]
-                    bx, by = _world_pivot(b)
-                else:
-                    bx, by = b.x_sym, b.y_sym
-                fx = ax - bx
-                fy = ay - by
+                fx = a_px - float(e.world[0])
+                fy = a_py - float(e.world[1])
+            elif b_px is not None:
+                fx = a_px - b_px
+                fy = a_py - b_py
             else:
                 raise ValueError("HingeJoint needs either 'world' or 'to' node")
-
             holonomic.append(fx)
             holonomic.append(fy)
 

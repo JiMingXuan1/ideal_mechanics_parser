@@ -33,7 +33,6 @@ export class GraphBuilder {
           id, type: 'RigidBody',
           params: {
             m: this._n(entity.params.m, 1),
-            I: this._n(entity.params.I),
             shape: entity.params.shape || 'rect',
             length: this._n(entity.params.length, 2),
             width: this._n(entity.params.width, 0.5),
