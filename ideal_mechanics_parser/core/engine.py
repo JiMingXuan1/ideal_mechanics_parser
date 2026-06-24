@@ -458,6 +458,15 @@ class Engine:
                              and any(len(te) > 0 for te in result.t_events))
 
             if any_triggered:
+                # Emit trajectory BEFORE the event (t=0 through t_event)
+                on_chunk({
+                    "t": result.t.tolist(),
+                    "q": result.y[:nq].T.tolist(),
+                    "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
+                    "node_order": node_order,
+                    "body_dofs": body_dofs,
+                })
+
                 t_event = None
                 first_idx = -1
                 for ei, te_list in enumerate(result.t_events):
@@ -599,6 +608,7 @@ class Engine:
                     "q": result.y[:nq].T.tolist(),
                     "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
                     "node_order": node_order,
+                    "body_dofs": body_dofs,
                     "complete": True,
                 })
                 break

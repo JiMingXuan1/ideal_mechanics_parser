@@ -91,7 +91,7 @@ def test_collision_wall():
         "system_env": {"view_plane": "XY", "gravity": 0, "duration": 2.0, "time_step": 0.01,
                        "max_mutations": 10},
         "nodes": [
-                {"id": "wall", "type": "Anchor", "init_pos": [5.0, 0.0], "params": {"radius": 0.5}},
+                {"id": "wall", "type": "Anchor", "init_pos": [3.0, 0.0], "params": {"radius": 0.5}},
             {"id": "ball", "type": "MassPoint", "params": {"m": 1, "radius": 0.5},
              "init_state": {"x": 0, "y": 0, "vx": 2, "vy": 0}},
         ],
