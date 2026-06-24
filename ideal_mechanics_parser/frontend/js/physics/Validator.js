@@ -23,11 +23,7 @@ export class Validator {
       if (edge.to) connectedNodeIds.add(edge.to);
     }
 
-    for (const [id, entity] of this.sm.entities) {
-      if (!connectedNodeIds.has(id)) {
-        errors.push(`Node "${id}" (${entity.type}) is isolated — no edges connected`);
-      }
-    }
+    // Isolated nodes (no edges) are valid: free particles, N-body gravity, etc.
 
     const edgePairs = new Set();
     for (const [id, edge] of this.sm.edges) {
