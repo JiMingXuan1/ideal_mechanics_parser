@@ -158,11 +158,16 @@ function _topologyHasEvents(topology) {
 
 function _startPlayback() {
   if (sm._playTimer) return;
+  const totalSimTime = sm.trajectory.t[sm.trajectory.t.length - 1] || 0;
+  const targetDuration = 15; // seconds of wall-time to play full sim
+  const speed = Math.max(1, totalSimTime / targetDuration);
+
   sm._playStart = performance.now();
   const tick = () => {
     if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
     if (sm.isPlaying) {
-      const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
+      const raw = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
+      const elapsed = raw * speed;
       const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
       sm.playhead = Math.min(elapsed, latest);
       setStatus(`<span class="highlight">▶</span> t = ${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`);
