@@ -138,9 +138,9 @@ export class PropertiesPanel {
     d.innerHTML = `<label>${key}</label><input type="text" value="${value}" />`;
     const inp = d.querySelector('input');
     inp.addEventListener('input', () => {
-      const raw = inp.value;
-      const n = parseFloat(raw);
-      onChange(isNaN(n) ? raw : n);
+      const raw = inp.value.trim();
+      const n = Number(raw);
+      onChange(raw === '' ? value : (Number.isFinite(n) ? n : raw));
     });
     this._body.appendChild(d);
   }
