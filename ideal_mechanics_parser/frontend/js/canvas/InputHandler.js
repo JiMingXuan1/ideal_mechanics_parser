@@ -103,6 +103,16 @@ export class InputHandler {
       return;
     }
 
+    if (this.sm.toolMode === 'add_rigidbody') {
+      const world = this._screenToWorld(e.clientX, e.clientY);
+      this.eb.emit('ADD_ENTITY', {
+        type: 'RigidBody', x: world.x, y: world.y,
+        theta: 0, vx: 0, vy: 0, omega: 0,
+        params: { m: 1.0, I: 0.167 },
+      });
+      return;
+    }
+
     if (this.sm.toolMode === 'add_anchor') {
       const world = this._screenToWorld(e.clientX, e.clientY);
       this.eb.emit('ADD_ENTITY', { type: 'Anchor', x: world.x, y: world.y });

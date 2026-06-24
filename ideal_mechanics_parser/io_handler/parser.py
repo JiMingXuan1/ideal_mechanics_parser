@@ -1,8 +1,11 @@
 import json
 
+VALID_NODE_TYPES = {"Anchor", "MassPoint", "RigidBody"}
+
 VALID_EDGE_TYPES = {
     "IdealRod", "IdealSpring", "SmoothRail",
     "FixedCoordinate", "LinearRelation", "DistanceSum", "AngleConstraint",
+    "HingeJoint",
 }
 
 def parse_json(filepath):
@@ -30,9 +33,12 @@ def _validate(topology):
     for n in topology["nodes"]:
         assert "id" in n, "Node missing id"
         assert "type" in n, f"Node {n['id']} missing type"
-        assert n["type"] in ("Anchor", "MassPoint"), f"Unknown node type: {n['type']}"
+        assert n["type"] in VALID_NODE_TYPES, f"Unknown node type: {n['type']}"
         if n["type"] == "Anchor":
             assert "init_pos" in n, f"Anchor {n['id']} missing init_pos"
+        if n["type"] == "RigidBody":
+            assert "params" in n and "m" in n["params"], f"RigidBody {n['id']} missing params.m"
+            assert "init_state" in n, f"RigidBody {n['id']} missing init_state"
         node_ids.add(n["id"])
 
     for e in topology["edges"]:

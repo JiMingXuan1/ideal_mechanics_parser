@@ -67,9 +67,15 @@ eb.on('DESELECT_ALL', () => {
 
 eb.on('HOVER', ({ id }) => { sm.hoveredEntityId = id; });
 
-eb.on('ADD_ENTITY', ({ type, x, y }) => {
+eb.on('ADD_ENTITY', (data) => {
+  const { type, x, y } = data;
   const id = uid('n');
-  const entity = { id, type, x, y, vx: 0, vy: 0, params: { m: 1.0 } };
+  const entity = { id, type, x, y, vx: data.vx || 0, vy: data.vy || 0, params: { m: 1.0 } };
+  if (type === 'RigidBody') {
+    entity.theta = data.theta || 0;
+    entity.omega = data.omega || 0;
+    entity.params = data.params || { m: 1.0, I: 0.167 };
+  }
   sm.addEntity(entity);
   history.push({ undo: () => sm.removeEntity(id), redo: () => sm.addEntity({ ...entity }) });
   eb.emit('SELECT', { id, isEdge: false });
@@ -120,6 +126,7 @@ eb.on('EDGE_END', ({ fromId, toId }) => {
     else if (t === 'LinearRelation') { p.coeffs = [1, -1, -1, 1]; p.constant = 0; }
     else if (t === 'DistanceSum') { p.via_id = ''; p.length = 10; }
     else if (t === 'AngleConstraint') p.angle = 1.5708;
+    else if (t === 'HingeJoint') { p.pivot = [0, 0]; p.world = [0, 0]; }
     const edge = { id, type: t, from: fromId, to: toId, params: p };
     sm.addEdge(edge);
     history.push({ undo: () => sm.removeEdge(id), redo: () => sm.addEdge({ ...edge }) });

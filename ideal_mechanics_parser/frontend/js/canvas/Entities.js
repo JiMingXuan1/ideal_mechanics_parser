@@ -177,6 +177,51 @@ export class Entities {
     ctx.fillText('string', mx, my - 12);
   }
 
+  static drawRigidBody(ctx, x, y, theta, hovered, selected, label) {
+    const c = this._color('point');
+    const size = 14;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(theta);
+    ctx.beginPath();
+    ctx.rect(-size, -size * 0.4, size * 2, size * 0.8);
+    ctx.fillStyle = hovered ? c.hover : selected ? c.select : '#e8eaed';
+    ctx.fill();
+    ctx.strokeStyle = selected ? c.select : c.fill;
+    ctx.lineWidth = selected ? 2.5 : 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(size * 0.6, 0);
+    ctx.lineTo(size, 0);
+    ctx.strokeStyle = c.fill;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+    if (label) {
+      ctx.fillStyle = '#656d76';
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x, y - size - 4);
+    }
+  }
+
+  static drawHingeJoint(ctx, x, y, hovered, selected) {
+    const c = this._color('rod');
+    const r = 5;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = selected ? c.select : hovered ? c.hover : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = selected ? c.select : c.base;
+    ctx.lineWidth = selected ? 2 : 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, r - 2, 0, Math.PI * 2);
+    ctx.strokeStyle = c.base;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
   static drawAngleConstraint(ctx, x1, y1, x2, y2, angle, hovered, selected) {
     const c = this._color('angle');
     const color = selected ? c.select : hovered ? c.hover : c.base;

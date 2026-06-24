@@ -71,6 +71,8 @@ export class Renderer {
 
       if (entity.type === 'Anchor') {
         Entities.drawAnchor(ctx, s.x, s.y, isHover, isSel);
+      } else if (entity.type === 'RigidBody') {
+        Entities.drawRigidBody(ctx, s.x, s.y, entity.theta || 0, isHover, isSel, id);
       } else {
         Entities.drawMassPoint(ctx, s.x, s.y, isHover, isSel, id);
       }
@@ -128,13 +130,21 @@ export class Renderer {
     const idx = Math.min(Math.floor(frac * (traj.t.length - 1)), traj.t.length - 1);
     const q = traj.q[idx];
     const nodeOrder = traj.node_order;
+    const bodyDofs = traj.body_dofs || nodeOrder.map(() => 2);
     const pos = {};
+    let qi = 0;
     for (let ni = 0; ni < nodeOrder.length; ni++) {
-      pos[nodeOrder[ni]] = { x: q[ni * 2], y: q[ni * 2 + 1] };
+      const dof = bodyDofs[ni] || 2;
+      pos[nodeOrder[ni]] = {
+        x: q[qi],
+        y: q[qi + 1],
+        theta: dof >= 3 ? q[qi + 2] : 0,
+      };
+      qi += dof;
     }
     for (const [eid, ent] of this.sm.entities) {
       if (!pos[eid]) {
-        pos[eid] = { x: ent.x, y: ent.y };
+        pos[eid] = { x: ent.x, y: ent.y, theta: ent.theta || 0 };
       }
     }
 
@@ -149,6 +159,7 @@ export class Renderer {
         case 'IdealRod': Entities.drawIdealRod(ctx, sA.x, sA.y, sB.x, sB.y, false, false); break;
         case 'IdealSpring': Entities.drawIdealSpring(ctx, sA.x, sA.y, sB.x, sB.y, false, false); break;
         case 'SmoothRail': Entities.drawSmoothRail(ctx, sA.x, sA.y, sB.x, sB.y, false, false); break;
+        case 'HingeJoint': Entities.drawHingeJoint(ctx, sA.x, sA.y, false, false); break;
         case 'DistanceSum': {
           const vE = edge.params?.via_id && this.sm.getEntity(edge.params.via_id);
           if (vE) Entities.drawDistanceSum(ctx, sA.x, sA.y, sB.x, sB.y, this.camera.worldToScreen(vE.x, vE.y), false, false);
@@ -163,7 +174,12 @@ export class Renderer {
       const p = pos[nid];
       if (!p) continue;
       const s = this.camera.worldToScreen(p.x, p.y);
-      Entities.drawMassPoint(ctx, s.x, s.y, false, false);
+      const ent = this.sm.getEntity(nid);
+      if (ent && ent.type === 'RigidBody') {
+        Entities.drawRigidBody(ctx, s.x, s.y, p.theta, false, false);
+      } else {
+        Entities.drawMassPoint(ctx, s.x, s.y, false, false);
+      }
     }
 
     ctx.fillStyle = '#656d76';

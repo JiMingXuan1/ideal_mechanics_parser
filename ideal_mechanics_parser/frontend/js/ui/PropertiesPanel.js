@@ -1,5 +1,6 @@
 const EDGE_FIELDS = {
   IdealRod: ['length'],
+  HingeJoint: ['pivot', 'world'],
   IdealSpring: ['k', 'l0'],
   SmoothRail: ['expr'],
   FixedCoordinate: [
@@ -57,6 +58,15 @@ export class PropertiesPanel {
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('vx', entity.vx || 0, (v) => { entity.vx = v; });
       this._inp('vy', entity.vy || 0, (v) => { entity.vy = v; });
+    } else if (entity.type === 'RigidBody') {
+      this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
+      this._inp('I', entity.params.I || 0.0, (v) => { entity.params.I = v; });
+      this._inp('x', entity.x, (v) => { entity.x = v; });
+      this._inp('y', entity.y, (v) => { entity.y = v; });
+      this._inp('theta', entity.theta || 0, (v) => { entity.theta = v; });
+      this._inp('vx', entity.vx || 0, (v) => { entity.vx = v; });
+      this._inp('vy', entity.vy || 0, (v) => { entity.vy = v; });
+      this._inp('omega', entity.omega || 0, (v) => { entity.omega = v; });
     }
   }
 

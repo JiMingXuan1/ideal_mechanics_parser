@@ -6,8 +6,9 @@ export class Toolbar {
     this._btnMap = {};
 
     this._add('select',    '↖', 'Select',  'select');
-    this._add('add_point', '⊕', 'Point',   'add_node');
-    this._add('add_anchor','⊡', 'Anchor',  'add_anchor');
+    this._add('add_point',    '⊕', 'Point',     'add_node');
+    this._add('add_rigidbody','◫', 'RigidBody', 'add_rigidbody');
+    this._add('add_anchor',   '⊡', 'Anchor',    'add_anchor');
     this._add('add_edge',  '╳', 'Edge',    'add_edge');
     this._add('delete',    '✕', 'Delete',  'delete');
     this._stopBtn = this._add('stop', '⏹', 'Stop', 'stop', false, true);

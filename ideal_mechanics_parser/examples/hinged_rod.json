@@ -1,0 +1,19 @@
+{
+  "system_env": {"view_plane": "XZ", "gravity": 9.81, "duration": 2.0, "time_step": 0.01},
+  "nodes": [
+    {
+      "id": "rod1",
+      "type": "RigidBody",
+      "params": {"m": 1.0, "I": 0.0833},
+      "init_state": {"x": 0.5, "y": -0.5, "theta": -1.47, "vx": 0.0, "vy": 0.0, "omega": 0.0}
+    }
+  ],
+  "edges": [
+    {
+      "id": "h1",
+      "type": "HingeJoint",
+      "from": "rod1",
+      "params": {"pivot": [-0.5, 0.0], "world": [0.0, 0.0]}
+    }
+  ]
+}

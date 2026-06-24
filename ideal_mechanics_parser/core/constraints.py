@@ -2,6 +2,25 @@ import sympy as sp
 from safety.sympify_sandbox import safe_sympify
 
 
+def _world_pivot(body):
+    """Return symbolic (x, y) of body's pivot point in world coordinates.
+
+    For a MassPoint pivot is just (x_sym, y_sym).
+    For a RigidBody with local pivot (u, v):
+        x_world = x_sym + u*cos(theta) - v*sin(theta)
+        y_world = y_sym + u*sin(theta) + v*cos(theta)
+    For an Anchor, (x_sym, y_sym) are static floats.
+    """
+    if hasattr(body, "theta_sym") and body.theta_sym is not None:
+        u, v = body.pivot_offset if hasattr(body, "pivot_offset") else (0.0, 0.0)
+        ct = sp.cos(body.theta_sym)
+        st = sp.sin(body.theta_sym)
+        px = body.x_sym + u * ct - v * st
+        py = body.y_sym + u * st + v * ct
+        return px, py
+    return body.x_sym, body.y_sym
+
+
 def harvest_constraints(edges, sm):
     holonomic = []
 
@@ -56,5 +75,31 @@ def harvest_constraints(edges, sm):
             cos_a = sp.cos(e.angle)
             f = (p2.x_sym - p1.x_sym) * sin_a - (p2.y_sym - p1.y_sym) * cos_a
             holonomic.append(f)
+
+        elif e.type == "HingeJoint":
+            a = e.from_node
+            if hasattr(a, "theta_sym") and a.theta_sym is not None:
+                a.pivot_offset = e.pivot
+                ax, ay = _world_pivot(a)
+            else:
+                ax, ay = a.x_sym, a.y_sym
+
+            if e.world is not None:
+                fx = ax - float(e.world[0])
+                fy = ay - float(e.world[1])
+            elif e.to_node is not None:
+                b = e.to_node
+                if hasattr(b, "theta_sym") and b.theta_sym is not None:
+                    b.pivot_offset = e.pivot_b if e.pivot_b is not None else [0.0, 0.0]
+                    bx, by = _world_pivot(b)
+                else:
+                    bx, by = b.x_sym, b.y_sym
+                fx = ax - bx
+                fy = ay - by
+            else:
+                raise ValueError("HingeJoint needs either 'world' or 'to' node")
+
+            holonomic.append(fx)
+            holonomic.append(fy)
 
     return holonomic

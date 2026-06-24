@@ -56,12 +56,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/solve":
             try:
+                from io_handler.parser import _validate
+                _validate(topology)
                 engine = Engine(topology)
                 result = engine.run()
                 self._send_json(200, result)
             except TopologyError as e:
                 self._send_error(422, str(e))
+            except (AssertionError, KeyError, ValueError) as e:
+                self._send_error(422, str(e))
             except Exception as e:
+                tb = traceback.format_exc()
+                sys.stderr.write(tb + "\n")
                 self._send_error(500, f"Engine error: {e}")
 
         elif parsed.path == "/solve/stream":
@@ -72,12 +78,18 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
             try:
+                from io_handler.parser import _validate
+                _validate(topology)
                 engine = Engine(topology)
                 engine.run_stream(on_chunk=lambda c: self._send_sse(c))
                 self._send_sse({"complete": True})
             except TopologyError as e:
                 self._send_sse({"error": str(e), "complete": True})
+            except (AssertionError, KeyError, ValueError) as e:
+                self._send_sse({"error": str(e), "complete": True})
             except Exception as e:
+                tb = traceback.format_exc()
+                sys.stderr.write(tb + "\n")
                 self._send_sse({"error": str(e), "complete": True})
 
         else:

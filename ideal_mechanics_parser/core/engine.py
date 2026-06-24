@@ -7,6 +7,7 @@ from .constraints import harvest_constraints
 from .projection import project_initial_state
 from .numerical import NumericalIntegrator
 from entities.mass_point import MassPoint
+from entities.rigid_body import RigidBody
 from entities.ideal_rod import IdealRod
 from entities.ideal_spring import IdealSpring
 from entities.smooth_rail import SmoothRail
@@ -14,13 +15,34 @@ from entities.fixed_coordinate import FixedCoordinate
 from entities.linear_relation import LinearRelation
 from entities.distance_sum import DistanceSum
 from entities.angle_constraint import AngleConstraint
+from entities.hinge_joint import HingeJoint
 
 
 class Engine:
+    CONSTRAINT_TYPES = {"IdealRod", "SmoothRail", "FixedCoordinate", "LinearRelation",
+                        "DistanceSum", "AngleConstraint", "HingeJoint"}
+
+    _NODE_TYPES = {
+        "MassPoint": MassPoint,
+        "RigidBody": RigidBody,
+    }
+
+    _EDGE_TYPES = {
+        "IdealRod": IdealRod,
+        "IdealSpring": IdealSpring,
+        "SmoothRail": SmoothRail,
+        "FixedCoordinate": FixedCoordinate,
+        "LinearRelation": LinearRelation,
+        "DistanceSum": DistanceSum,
+        "AngleConstraint": AngleConstraint,
+        "HingeJoint": HingeJoint,
+    }
+
     def __init__(self, topology):
         self.topology = topology
         self.sm = SymbolManager()
         self.points = []
+        self.rigid_bodies = []
         self.edges = []
 
     def run(self):
@@ -33,60 +55,53 @@ class Engine:
 
     def _step1_instantiate(self):
         for node in self.topology["nodes"]:
-            if node["type"] == "MassPoint":
+            ntype = node["type"]
+            if ntype == "MassPoint":
                 p = MassPoint(node["id"], node.get("init_state"), node.get("params"))
                 p.m = float(node.get("params", {}).get("m", 1.0))
                 self.sm.add_point(p)
                 self.points.append(p)
-
-        _EDGE_TYPES = {
-            "IdealRod": IdealRod,
-            "IdealSpring": IdealSpring,
-            "SmoothRail": SmoothRail,
-            "FixedCoordinate": FixedCoordinate,
-            "LinearRelation": LinearRelation,
-            "DistanceSum": DistanceSum,
-            "AngleConstraint": AngleConstraint,
-        }
+            elif ntype == "RigidBody":
+                b = RigidBody(node["id"], node.get("init_state"), node.get("params"))
+                b.m = float(node.get("params", {}).get("m", 1.0))
+                b.I = float(node.get("params", {}).get("I", 0.0))
+                self.sm.add_rigid_body(b)
+                self.rigid_bodies.append(b)
 
         for edge_data in self.topology["edges"]:
-            cls = _EDGE_TYPES.get(edge_data["type"])
+            cls = self._EDGE_TYPES.get(edge_data["type"])
             if cls is None:
                 continue
             e = cls(edge_data["id"], edge_data.get("from"), edge_data.get("to"), edge_data.get("params"))
             self.edges.append(e)
 
-        all_nodes = {n["id"]: n for n in self.topology["nodes"]}
-        for e in self.edges:
-            for p in self.points:
-                if p.id == e.from_id:
-                    e.from_node = p
-                if p.id == e.to_id:
-                    e.to_node = p
+        node_map = {}
+        for p in self.points:
+            node_map[p.id] = p
+        for b in self.rigid_bodies:
+            node_map[b.id] = b
+        for n in self.topology["nodes"]:
+            if n["type"] == "Anchor" and n["id"] not in node_map:
+                node_map[n["id"]] = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
 
-            if e.from_node is None or (e.to_node is None and e.type not in ("FixedCoordinate", "LinearRelation")):
-                for n in self.topology["nodes"]:
-                    if n["type"] == "Anchor":
-                        if n["id"] == e.from_id:
-                            e.from_node = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
-                        if n["id"] == e.to_id:
-                            e.to_node = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
+        for e in self.edges:
+            e.from_node = node_map.get(e.from_id)
+            if e.to_id:
+                e.to_node = node_map.get(e.to_id)
 
             if hasattr(e, "via_id") and e.via_id:
-                for p in self.points:
-                    if p.id == e.via_id:
-                        e.via_node = p
-                if getattr(e, "via_node", None) is None:
-                    for n in self.topology["nodes"]:
-                        if n["type"] == "Anchor" and n["id"] == e.via_id:
-                            e.via_node = AnchorLike(n["id"], n.get("init_pos", [0, 0]))
+                e.via_node = node_map.get(e.via_id)
+
+            if e.from_node is None:
+                raise ValueError(f"Edge {e.id}: from_node '{e.from_id}' not found")
 
     def _step2_project(self):
-        q0 = self.sm.get_q0(self.points)
-        qd0 = self.sm.get_qd0(self.points)
+        q0 = self.sm.get_q0(self.points, self.rigid_bodies)
+        qd0 = self.sm.get_qd0(self.points, self.rigid_bodies)
 
         if self._has_constraints():
-            L, _ = assemble_energy(self.points, self.edges, self.topology["system_env"], self.sm)
+            L, _ = assemble_energy(self.points, self.edges, self.topology["system_env"],
+                                   self.sm, self.rigid_bodies)
             holonomic = harvest_constraints(self.edges, self.sm)
             q = self.sm.q
 
@@ -101,16 +116,11 @@ class Engine:
         self.qd0 = qd0
 
     def _has_constraints(self):
-        CONSTRAINT_TYPES = {"IdealRod", "SmoothRail", "FixedCoordinate", "LinearRelation",
-                           "DistanceSum", "AngleConstraint"}
-        for e in self.edges:
-            if e.type in CONSTRAINT_TYPES:
-                return True
-        return False
+        return any(e.type in self.CONSTRAINT_TYPES for e in self.edges)
 
     def _step3_energy(self):
         env = self.topology["system_env"]
-        self.T, self.V = assemble_energy(self.points, self.edges, env, self.sm)
+        self.T, self.V = assemble_energy(self.points, self.edges, env, self.sm, self.rigid_bodies)
 
     def _step4_constraints(self):
         self.holonomic = harvest_constraints(self.edges, self.sm)
@@ -128,11 +138,14 @@ class Engine:
         t_eval = np.arange(0.0, duration + time_step, time_step)
 
         t, q_traj, qd_traj = integrator.integrate(self.q0_projected, self.qd0, t_eval)
+        node_order = [p.id for p in self.points] + [b.id for b in self.rigid_bodies]
+        body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
         return {
             "t": t.tolist(),
             "q": q_traj.tolist(),
             "qd": qd_traj.tolist(),
-            "node_order": [p.id for p in self.points],
+            "node_order": node_order,
+            "body_dofs": body_dofs,
         }
 
     def run_stream(self, on_chunk, seg_duration=0.5):
@@ -151,7 +164,8 @@ class Engine:
         t_full = np.arange(0.0, duration + dt, dt)
         state = np.concatenate([self.q0_projected, self.qd0])
         nq = self.sm.nq
-        node_order = [p.id for p in self.points]
+        node_order = [p.id for p in self.points] + [b.id for b in self.rigid_bodies]
+        body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
 
         seg_start = 0.0
         while seg_start < duration:
@@ -169,12 +183,15 @@ class Engine:
                 return
 
             state = result.y[:, -1]
-            on_chunk({
+            chunk = {
                 "t": result.t.tolist(),
                 "q": result.y[:nq].T.tolist(),
                 "node_order": node_order,
                 "complete": seg_end >= duration,
-            })
+            }
+            if seg_start == 0.0:
+                chunk["body_dofs"] = body_dofs
+            on_chunk(chunk)
             seg_start = seg_end
 
 
