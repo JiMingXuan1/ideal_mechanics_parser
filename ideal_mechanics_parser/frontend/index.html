@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ideal Mechanics Parser</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/console.css">
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div id="toolbar"></div>
+
+  <div id="status-bar">
+    <span id="status-text">
+      <span class="highlight">⊡ Anchor</span> 固定点 · 
+      <span class="highlight">⊕ Point</span> 质点 · 
+      <span class="highlight">╳ Edge</span> 连线 · 
+      <span class="highlight">▶ Run</span> · 
+      <span class="highlight">`</span> 控制台
+    </span>
+  </div>
+
+  <div id="properties-panel" class="panel hidden">
+    <div class="panel-header">Properties</div>
+    <div id="properties-body"></div>
+  </div>
+
+  <div id="console" class="hidden">
+    <div id="console-history"></div>
+    <div id="console-input-line">
+      <span class="console-prefix">></span>
+      <input type="text" id="console-input" autocomplete="off" spellcheck="false" placeholder="type help" />
+    </div>
+  </div>
+
+  <div id="edge-type-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>选择连接类型</h3>
+      <select id="edge-type-select">
+        <option value="IdealRod">IdealRod (轻杆)</option>
+        <option value="IdealSpring">IdealSpring (弹簧)</option>
+        <option value="SmoothRail">SmoothRail (轨道)</option>
+        <option value="FixedCoordinate">FixedCoordinate (定坐标)</option>
+        <option value="LinearRelation">LinearRelation (线性关系)</option>
+        <option value="DistanceSum">DistanceSum (滑轮/绳)</option>
+        <option value="AngleConstraint">AngleConstraint (角度约束)</option>
+      </select>
+      <div id="edge-type-params"></div>
+      <button id="edge-confirm">确认连线</button>
+      <button id="edge-cancel">取消</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "system_env": {
+    "view_plane": "XZ",
+    "gravity": 9.81,
+    "time_step": 0.01,
+    "duration": 8.0
+  },
+  "nodes": [
+    {"id": "pulley", "type": "Anchor", "init_pos": [0, 6]},
+    {"id": "m1", "type": "MassPoint", "params": {"m": 2.0}, "init_state": {"x": -1, "y": 2, "vx": 0, "vy": 0}},
+    {"id": "m2", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 1, "y": 3, "vx": 0, "vy": 0}}
+  ],
+  "edges": [
+    {"id": "e1", "type": "DistanceSum", "from": "m1", "to": "m2", "params": {"via_id": "pulley", "length": 9.0}}
+  ]
+}

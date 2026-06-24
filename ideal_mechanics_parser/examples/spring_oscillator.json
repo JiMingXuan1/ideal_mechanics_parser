@@ -1,0 +1,15 @@
+{
+  "system_env": {
+    "view_plane": "XY",
+    "gravity": 0.0,
+    "time_step": 0.001,
+    "duration": 5.0
+  },
+  "nodes": [
+    {"id": "n1", "type": "Anchor", "init_pos": [0, 0]},
+    {"id": "n2", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 1.0, "y": 0, "vx": 0, "vy": 0}}
+  ],
+  "edges": [
+    {"id": "e1", "type": "IdealSpring", "from": "n1", "to": "n2", "params": {"k": 100.0, "l0": 0.5}}
+  ]
+}

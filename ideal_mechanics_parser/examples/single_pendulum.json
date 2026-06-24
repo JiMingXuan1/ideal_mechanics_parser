@@ -1,0 +1,15 @@
+{
+  "system_env": {
+    "view_plane": "XZ",
+    "gravity": 9.81,
+    "time_step": 0.01,
+    "duration": 10.0
+  },
+  "nodes": [
+    {"id": "n1", "type": "Anchor", "init_pos": [0, 5]},
+    {"id": "n2", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 3, "y": 1, "vx": 0, "vy": 0}}
+  ],
+  "edges": [
+    {"id": "e1", "type": "IdealRod", "from": "n1", "to": "n2", "params": {"length": 5.0}}
+  ]
+}

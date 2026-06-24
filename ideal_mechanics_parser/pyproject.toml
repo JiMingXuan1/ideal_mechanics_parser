@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ideal-mechanics-parser"
+version = "0.1.0"
+description = "Physics-competition-grade multibody dynamics solver using maximal coordinates + symbolic Lagrangian mechanics + implicit integration"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "sympy>=1.12",
+    "scipy>=1.11",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]

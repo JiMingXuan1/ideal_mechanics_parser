@@ -1,0 +1,17 @@
+{
+  "system_env": {
+    "view_plane": "XZ",
+    "gravity": 9.81,
+    "time_step": 0.01,
+    "duration": 50.0
+  },
+  "nodes": [
+    {"id": "n1", "type": "Anchor", "init_pos": [0, 10]},
+    {"id": "n2", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 3, "y": 6, "vx": 0, "vy": 0}},
+    {"id": "n3", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 5, "y": 3, "vx": 0, "vy": 0}}
+  ],
+  "edges": [
+    {"id": "e1", "type": "IdealRod", "from": "n1", "to": "n2", "params": {"length": 5.0}},
+    {"id": "e2", "type": "IdealRod", "from": "n2", "to": "n3", "params": {"length": 5.0}}
+  ]
+}
