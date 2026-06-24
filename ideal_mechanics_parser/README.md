@@ -1,66 +1,170 @@
 # Ideal Mechanics Parser
 
-**物理竞赛级理想力学解析器** — 基于最大坐标法 + SymPy 符号推导 + SciPy 隐式积分的多体动力学解算引擎。
+**物理竞赛级二维理想力学模拟器**——拖拽搭建、实时仿真，零代码做物理。
 
-## Architecture
+在后端，它是 SymPy 符号推导 + SciPy Radau 隐式积分 + 最大坐标法的多体动力学引擎；在前端，它是纯粹的 HTML5 Canvas + Vanilla JS，零框架依赖。
 
-```mermaid
-flowchart LR
-    FE["Frontend (HTML5 Canvas + JS)
-        拖拽构建拓扑图
-        → 序列化 JSON"] -->|JSON| BE
+---
 
-    subgraph BE["Backend (Python)"]
-        direction TB
-        S1["Step 1
-            符号注册"] --> S15["Step 1.5
-            Newton-Raphson
-            流形投影"]
-        S15 --> S2["Step 2
-            能量聚合
-            T + V"]
-        S2 --> S3["Step 3
-            约束收割
-            f_c = 0"]
-        S3 --> S4["Step 4
-            Baumgarte 数值组装
-            + SVD 伪逆
-            + Radau 积分"]
-        S4 --> OUT["时间序列 JSON"]
-    end
-
-    BE -->|时间序列| FE
-```
-
-### 数值装甲三件套 (Numerical Armor Triad)
-
-1. **流形投影** — Newton-Raphson 将初始坐标投影到约束流形
-2. **Baumgarte 稳定化** — $\ddot{f}_c + 2\alpha\dot{f}_c + \beta^2 f_c = 0$ 消除约束漂移
-3. **SVD 伪逆** — 冗余约束时用 `np.linalg.pinv` 免疫奇异矩阵
-
-## Requirements
-
-- Python >= 3.10
-- sympy >= 1.12
-- scipy >= 1.11
-- numpy >= 1.24
-
-## Installation
+## 快速开始
 
 ```bash
 cd ideal_mechanics_parser
 pip install -r requirements.txt
+python server.py
 ```
 
-## Quick Start
+浏览器打开 `http://localhost:8000`。
 
-```bash
-python main.py examples/single_pendulum.json
+---
+
+## UI 速览
+
+```
+┌────────────────────────────────────────────────┐
+│  [↖] [⊕] [◫] [⊡] [╳] [✕]          [▶ Run]    │  工具栏（左上）
+│  ────────────────────────                       │
+│                                                 │
+│                   画布                           │  拖拽、点击构建
+│           (Canvas)                              │
+│                                                 │
+│                                    ┌──────────┐│
+│                                    │ ID: n1   ││  属性面板（右下）
+│                                    │ Type:    ││
+│                                    │ m: [1.0] ││
+│                                    │ ...      ││
+│                                    └──────────┘│
+│                                    ┌──────────┐│
+│  ══════════════════════════════════│ > gamemode││  控制台（底部）
+│                                    └──────────┘│
+└────────────────────────────────────────────────┘
 ```
 
-输出为 `output/single_pendulum_trajectory.json`，包含时间序列坐标矩阵。
+### 工具栏
 
-### 单摆示例
+| 按钮 | 快捷键 | 功能 |
+|------|--------|------|
+| `↖` Select | `V` | 选择/拖拽实体 |
+| `⊕` Point | `P` | 放置质点 |
+| `◫` RigidBody | `B` | 放置刚体（矩形，带朝向） |
+| `⊡` Anchor | `A` | 放置固定锚点 |
+| `╳` Edge | `E` | 连接两个节点（选类型） |
+| `✕` Delete | `Del` | 删除选中 |
+| `▶` / `⏸` Run | — | 开始/暂停仿真 |
+| `⏹` Stop | — | 停止仿真（运行时出现） |
+
+### 创建仿真：3 步
+
+**1. 放节点**：点 `⊕` 放质点，点 `⊡` 放锚点
+**2. 连边**：点 `╳`，依次点两个节点，弹出类型选择（杆/弹簧/轨道/铰接…）
+**3. 运行**：点 `▶`，实时看到物理运动
+
+### 属性面板
+
+选中任意实体或边后，右下角出现属性面板。可修改：
+
+- **质点**：`m`（质量）、`x/y`（初始位置）、`vx/vy`（初始速度）
+- **刚体**：同上 + `I`（转动惯量）、`theta`（初始角）、`omega`（初始角速度）
+- **锚点**：`x/y`
+- **边**：根据类型显示不同参数（杆长、弹簧系数、铰接偏移……）
+
+### 控制台
+
+按下 **`` `**（反引号）打开/关闭控制台。支持命令：
+
+| 命令 | 说明 |
+|------|------|
+| `gamemode XZ` | 切换到竖直平面（重力开） |
+| `gamemode XY` | 切换到水平平面（重力关） |
+| `duration 300` | 设置仿真时长（秒） |
+| `run` | 开始仿真 |
+| `stop` | 停止仿真 |
+| `set n1 x 5` | 设置实体 `n1` 的属性 `x` 为 5 |
+| `undo` | 撤销上一步 |
+| `redo` | 重做 |
+| `help` | 查看所有命令 |
+
+---
+
+## 实体库
+
+### 节点
+
+| 类型 | 图标 | 自由度 | 说明 |
+|------|------|--------|------|
+| **Anchor** | 菱形 + 十字 | — | 固定锚点，不可移动 |
+| **MassPoint** | 蓝圆 | `(x, y)` | 质点，受重力/约束 |
+| **RigidBody** | 矩形 + 方向线 | `(x, y, θ)` | 刚体，支持转动惯量和铰接 |
+
+### 边
+
+| 类型 | 连线 | 说明 | 参数 |
+|------|------|------|------|
+| **IdealRod** (轻杆) | 实线 + label | 两节点距离恒定：`‖p₁-p₂‖² = L²` | `length` |
+| **IdealSpring** (弹簧) | 锯齿线 | 弹性势能：`½k(d-l₀)²` | `k`（刚度）, `l0`（原长） |
+| **SmoothRail** (轨道) | 虚线 | 约束在曲线 `f(x,y,t)=0` 上 | `expr`（SymPy 表达式） |
+| **FixedCoordinate** (定坐标) | 圆 + 十字 | 锁定单坐标 `x=c` 或 `y=c` | `coord`（x/y）, `value` |
+| **LinearRelation** (线性关系) | 虚线 | 多坐标线性组合=常数 | `coeffs`, `constant` |
+| **DistanceSum** (滑轮绳) | 虚线 + 过滑轮 | 总绳长恒定 | `via_id`（滑轮节点）, `length` |
+| **AngleConstraint** (定角) | 实线 + 角度 | 连线与水平夹角固定 | `angle`（弧度） |
+| **HingeJoint** (铰接) | ⭕ | 刚体局部点→世界点/另一节点 | `pivot`, `world`/`to` |
+| **SoftRope** (软绳) | — | 松弛→绷紧自动切换（实验性） | `length` |
+
+---
+
+## 表达式注入（逃生舱）
+
+核心特性：在数字字段填入 **数学函数表达式**（不是数字），后端用 SymPy 安全解析。
+
+### 移动锚点
+
+锚点属性面板中的 `ƒ x_expr` 和 `ƒ y_expr` 接受时间函数：
+
+```
+x_expr: "t**2"          → 锚点按 x = t² 运动
+y_expr: "5.0"           → y 固定为 5.0
+x_expr: "2*sin(pi*t)"   → 锚点简谐运动
+```
+
+锚点位置由表达式决定，与之相连的杆/弹簧/轨道自动跟随。
+
+### 外部驱动力
+
+质点属性面板中的 `ƒ Fx(t)` 和 `ƒ Fy(t)` 给质点施加与时间相关的外力：
+
+```
+Fx(t): "10*sin(2*pi*t)"   → 周期驱动力
+Fy(t): "m*g"              → 抵消重力（m=质量，g=9.81）
+Fx(t): "5.0"              → 恒力 5N
+```
+
+力是**广义力**，直接作用在对应坐标方向。（`XZ` 平面下重力默认向下—Y 方向，所以 `Fy(t) = m*g` 可抵消重力）
+
+### 光滑轨道
+
+连接节点的 SmoothRail 边，`expr` 参数接受隐式曲线方程：
+
+```
+y - x**2         → 抛物线轨道
+x**2 + y**2 - 4 → 半径 2 的圆轨道
+y - sin(x)      → 正弦波轨道
+```
+
+轨道方程可以使用 `x`、`y`（质点的坐标）和 `t`（时间）。
+
+### 可用函数
+
+```
+sin  cos  tan  pi  exp  sqrt  Abs  log
+asin  acos  atan  sinh  cosh  tanh
+t  (时间变量)
+```
+
+---
+
+## JSON 拓扑格式（高级）
+
+启动服务器后，也可通过 `POST /solve` 直接发 JSON 批量求解：
 
 ```json
 {
@@ -71,46 +175,77 @@ python main.py examples/single_pendulum.json
     "duration": 10.0
   },
   "nodes": [
-    {"id": "n1", "type": "Anchor", "init_pos": [0, 5]},
-    {"id": "n2", "type": "MassPoint", "params": {"m": 1.0}, "init_state": {"x": 3, "y": 1, "vx": 0, "vy": 0}}
+    {"id": "n1", "type": "Anchor", "init_pos": [0, 0]},
+    {"id": "n2", "type": "MassPoint",
+     "params": {"m": 1.0, "external_force_x_expr": "5*sin(t)"},
+     "init_state": {"x": 2, "y": 0, "vx": 0, "vy": 0}}
   ],
   "edges": [
-    {"id": "e1", "type": "IdealRod", "from": "n1", "to": "n2", "params": {"length": 5.0}}
+    {"id": "e1", "type": "IdealRod", "from": "n1", "to": "n2",
+     "params": {"length": 2.0}}
   ]
 }
 ```
 
-## Entity Library
+返回格式：
 
-| Entity | Type | Description |
-|--------|------|-------------|
-| Anchor | Node | 固定锚点，零自由度 |
-| MassPoint | Node | 质点，笛卡尔自由度 $(x, y)$ |
-| IdealRod | Edge | 理想轻杆，等距约束 $(x_1-x_2)^2+(y_1-y_2)^2 = L^2$ |
-| IdealSpring | Edge | 理想弹簧，弹性势能 $V_k = \frac{1}{2}k(d - l_0)^2$ |
-| SmoothRail | Edge | 光滑轨道，隐式方程约束 $f(x, y) = 0$ |
-| FixedCoordinate | Edge | 固定坐标约束 $x_i = c$ 或 $y_i = c$ |
-| LinearRelation | Edge | 广义线性关系 $a_1 x_1 + b_1 y_1 + a_2 x_2 + b_2 y_2 + c = 0$ |
-| DistanceSum | Edge | 滑轮/绳约束 $\|p_1 - p_a\| + \|p_2 - p_a\| = L$ |
-| AngleConstraint | Edge | 定向约束 $(x_2-x_1)\sin\theta - (y_2-y_1)\cos\theta = 0$ |
+```json
+{
+  "t": [0.0, 0.01, 0.02, ...],
+  "q": [[x0, y0, x1, y1, ...], ...],
+  "qd": [[vx0, vy0, vx1, vy1, ...], ...],
+  "node_order": ["n1", "n2"],
+  "body_dofs": [2, 2]
+}
+```
 
-## Roadmap
+`body_dofs` 指示每个节点在 `q` 中占几个自由度（质点=2，刚体=3）。
 
-- **Phase 1** ✅: 纯等式约束 + 数值装甲 + 新约束扩展
-- **Phase 2** 🔄: 刚体 + 碰撞事件 + 软绳（中断-重构-重启）
-- **Phase 3** 📋: 摩擦 LCP 平行引擎 + 黑盒寻优 API
+命令行求解：
 
-## Documentation
+```bash
+python main.py examples/single_pendulum.json
+python main.py examples/hinged_rod.json
+```
 
-- [Core Architecture](../docs/core_architecture.md) — 架构设计 + 图元库
-- [Backend Pipeline](../docs/backend_pipeline.md) — 5步流水线详述
-- [P1 Features Spec](../docs/p1_features.md) — 约束类型 + 逃生舱 + 时间真相
-- [Frontend Spec](../docs/frontend_spec.md) — 前端 JS 架构
-- [Test Spec](../docs/test_spec.md) — 测试规范
-- [Roadmap](../docs/roadmap.md) — 阶段演进路线
-- [P1 Enhancement Plans](../docs/P1/) — 后稳定投影、参数可配置
-- [P2 Research Notes](../docs/P2/) — 软绳、碰撞
-- [P3 Research Notes](../docs/P3/) — LCP、辛积分器
+---
+
+## 示例
+
+| 文件 | 说明 |
+|------|------|
+| `examples/single_pendulum.json` | 单摆 |
+| `examples/double_pendulum.json` | 双摆（混沌） |
+| `examples/spring_oscillator.json` | 弹簧振子 |
+| `examples/atwood.json` | 阿特伍德机 |
+| `examples/hinged_rod.json` | 复合摆（刚体+铰接） |
+
+---
+
+## 架构概览
+
+```
+JSON 拓扑 → Step 1: 符号实例化 → Step 1.5: N-R 投影
+         → Step 2: 能量聚合 (T + V) → Step 3: 约束收割
+         → Step 4: Baumgarte + Radau 积分 → 时间序列 JSON
+```
+
+- **最大坐标法**：每个质点 `(x, y)` 是独立自由度，约束通过拉格朗日乘子法处理
+- **拉格朗日方程**：`L = T - V` → `LagrangesMethod` 自动推导运动方程
+- **Baumgarte 稳定化**：`α=β=1` 消除约束漂移
+- **Radau IIA**：5 阶隐式 Runge-Kutta，适合 DAE 系统
+
+---
+
+## 运行测试
+
+```bash
+pytest tests/ -v
+```
+
+当前 **63 个测试**全部通过，覆盖：单摆周期、弹簧频率、双摆守恒、约束漂移、投影收敛、奇异 Jacobian、表达式注入、碰撞检测、软绳绷紧、角动量守恒、刚体铰接、API 端到端。
+
+---
 
 ## License
 
