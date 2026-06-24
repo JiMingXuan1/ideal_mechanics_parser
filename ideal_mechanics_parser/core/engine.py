@@ -238,10 +238,11 @@ class Engine:
     # ─── Event-Driven Methods ──────────────────────────────────────────
 
     def _event_func_from_state(self, body_id_a, body_id_b):
-        """Return a closure thatsolve_ivp can call as event(t, state).
+        """Return a closure for solve_ivp to use as event(t, state).
 
-        Returns the signed distance between two bodies' surfaces:
-            gap = ||p_a - p_b|| - (r_a + r_b)
+        Uses squared distance to ensure the function crosses zero
+        (goes negative when bodies overlap) regardless of radius.
+            event = ||p_a - p_b||^2 - (r_a + r_b)^2
         """
         body_a = self._find_body(body_id_a)
         body_b = self._find_body(body_id_b)
@@ -250,8 +251,8 @@ class Engine:
 
         idx_a = self._body_dof_index(body_a)
         idx_b = self._body_dof_index(body_b)
-        r_a = getattr(body_a, "radius", 0.0)
-        r_b = getattr(body_b, "radius", 0.0)
+        r_sum = getattr(body_a, "radius", 0.0) + getattr(body_b, "radius", 0.0)
+        r_sum_sq = r_sum * r_sum
 
         def event(t, state):
             ax = state[idx_a]
@@ -260,9 +261,9 @@ class Engine:
             by = state[idx_b + 1]
             dx = ax - bx
             dy = ay - by
-            return np.sqrt(dx * dx + dy * dy) - (r_a + r_b)
+            return dx * dx + dy * dy - r_sum_sq
         event.terminal = True
-        event.direction = -1
+        event.direction = 0
         return event
 
     def _find_body(self, body_id):
@@ -336,12 +337,14 @@ class Engine:
                 bi_r = getattr(bi, "radius", 0.0)
 
                 def make_anchor_event(idx_i, ax, ay, bi_r, anchor_r):
+                    r_sum = bi_r + anchor_r
+                    r_sum_sq = r_sum * r_sum
                     def event(t, state):
                         dx = state[idx_i] - ax
                         dy = state[idx_i + 1] - ay
-                        return np.sqrt(dx * dx + dy * dy) - (bi_r + anchor_r)
+                        return dx * dx + dy * dy - r_sum_sq
                     event.terminal = True
-                    event.direction = -1
+                    event.direction = 0
                     return event
 
                 events.append({
