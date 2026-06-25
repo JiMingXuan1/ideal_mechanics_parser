@@ -177,55 +177,31 @@ export class Entities {
     ctx.fillText('string', mx, my - 12);
   }
 
-  static drawRigidBody(ctx, x, y, theta, hovered, selected, label, opts) {
+  static drawRigidBody(ctx, x, y, theta, hovered, selected, label) {
     const c = this._color('point');
-    const len = (opts?.length || 2) / 2;
-    const wid = (opts?.width || 0.5) / 2;
-    const shape = opts?.shape || 'rect';
-    const color = selected ? c.select : hovered ? c.hover : c.fill;
-
+    const size = 14;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(theta);
-
-    if (shape === 'rod') {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = selected ? 4 : 3;
-      ctx.beginPath();
-      ctx.moveTo(-len, 0);
-      ctx.lineTo(len, 0);
-      ctx.stroke();
-      // Endpoint dots
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(-len, 0, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(len, 0, 3, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.beginPath();
-      ctx.rect(-len, -wid, len * 2, wid * 2);
-      ctx.fillStyle = hovered ? c.hover : selected ? c.select : '#e8eaed';
-      ctx.fill();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = selected ? 2.5 : 1.5;
-      ctx.stroke();
-      // Direction indicator
-      ctx.beginPath();
-      ctx.moveTo(len * 0.7, 0);
-      ctx.lineTo(len, 0);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
+    ctx.beginPath();
+    ctx.rect(-size, -size * 0.4, size * 2, size * 0.8);
+    ctx.fillStyle = hovered ? c.hover : selected ? c.select : '#e8eaed';
+    ctx.fill();
+    ctx.strokeStyle = selected ? c.select : c.fill;
+    ctx.lineWidth = selected ? 2.5 : 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(size * 0.6, 0);
+    ctx.lineTo(size, 0);
+    ctx.strokeStyle = c.fill;
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.restore();
     if (label) {
       ctx.fillStyle = '#656d76';
       ctx.font = '10px -apple-system, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(label, x, y - Math.max(len, wid) - 6);
+      ctx.fillText(label, x, y - size - 4);
     }
   }
 

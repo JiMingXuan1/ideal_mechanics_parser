@@ -187,12 +187,11 @@ class Engine:
             "body_dofs": body_dofs,
         }
 
-    def run_stream(self, on_chunk, seg_duration=0.5, _skip_init=False):
-        if not _skip_init:
-            self._step1_instantiate()
-            self._step2_project()
-            self._step3_energy()
-            self._step4_constraints()
+    def run_stream(self, on_chunk, seg_duration=0.5):
+        self._step1_instantiate()
+        self._step2_project()
+        self._step3_energy()
+        self._step4_constraints()
         L = self.T - self.V
         q = self.sm.q
         qd = self.sm.qd
@@ -238,11 +237,10 @@ class Engine:
     # ─── Event-Driven Methods ──────────────────────────────────────────
 
     def _event_func_from_state(self, body_id_a, body_id_b):
-        """Return a closure for solve_ivp to use as event(t, state).
+        """Return a closure thatsolve_ivp can call as event(t, state).
 
-        Uses squared distance to ensure the function crosses zero
-        (goes negative when bodies overlap) regardless of radius.
-            event = ||p_a - p_b||^2 - (r_a + r_b)^2
+        Returns the signed distance between two bodies' surfaces:
+            gap = ||p_a - p_b|| - (r_a + r_b)
         """
         body_a = self._find_body(body_id_a)
         body_b = self._find_body(body_id_b)
@@ -251,8 +249,10 @@ class Engine:
 
         idx_a = self._body_dof_index(body_a)
         idx_b = self._body_dof_index(body_b)
-        r_sum = getattr(body_a, "radius", 0.0) + getattr(body_b, "radius", 0.0)
-        r_sum_sq = r_sum * r_sum
+        dof_a = 3 if hasattr(body_a, "theta_sym") and body_a.theta_sym is not None else 2
+        dof_b = 3 if hasattr(body_b, "theta_sym") and body_b.theta_sym is not None else 2
+        r_a = getattr(body_a, "radius", 0.0)
+        r_b = getattr(body_b, "radius", 0.0)
 
         def event(t, state):
             ax = state[idx_a]
@@ -261,9 +261,8 @@ class Engine:
             by = state[idx_b + 1]
             dx = ax - bx
             dy = ay - by
-            return dx * dx + dy * dy - r_sum_sq
-        event.terminal = True
-        event.direction = 0
+            return np.sqrt(dx * dx + dy * dy) - (r_a + r_b)
+
         return event
 
     def _find_body(self, body_id):
@@ -337,14 +336,11 @@ class Engine:
                 bi_r = getattr(bi, "radius", 0.0)
 
                 def make_anchor_event(idx_i, ax, ay, bi_r, anchor_r):
-                    r_sum = bi_r + anchor_r
-                    r_sum_sq = r_sum * r_sum
                     def event(t, state):
                         dx = state[idx_i] - ax
                         dy = state[idx_i + 1] - ay
-                        return dx * dx + dy * dy - r_sum_sq
-                    event.terminal = True
-                    event.direction = 0
+                        return np.sqrt(dx * dx + dy * dy) - (bi_r + anchor_r)
+                    event.direction = -1
                     return event
 
                 events.append({
@@ -357,7 +353,6 @@ class Engine:
                     "body_j": None,
                     "_anchor_x": ax,
                     "_anchor_y": ay,
-                    "_anchor_r": anchor_r,
                     "restitution": restitution,
                 })
         return events
@@ -380,7 +375,7 @@ class Engine:
                     dx = state[idx_a] - state[idx_b]
                     dy = state[idx_a + 1] - state[idx_b + 1]
                     return np.sqrt(dx * dx + dy * dy) - length
-                event.terminal = True
+                # Tighten: goes from slack (neg) to tight (zero → pos) → direction +1
                 event.direction = +1
                 return event
 
@@ -389,7 +384,7 @@ class Engine:
                     dx = state[idx_a] - state[idx_b]
                     dy = state[idx_a + 1] - state[idx_b + 1]
                     return np.sqrt(dx * dx + dy * dy) - length
-                event.terminal = True
+                # Slacken: goes from tight (pos) to slack (zero → neg) → direction -1
                 event.direction = -1
                 return event
 
@@ -428,7 +423,7 @@ class Engine:
         all_event_defs = collision_events + soft_rope_events
 
         if not all_event_defs:
-            self.run_stream(on_chunk, _skip_init=True)
+            self.run_stream(on_chunk)
             return
 
         L = self.T - self.V
@@ -462,15 +457,6 @@ class Engine:
                              and any(len(te) > 0 for te in result.t_events))
 
             if any_triggered:
-                # Emit trajectory BEFORE the event (t=0 through t_event)
-                on_chunk({
-                    "t": result.t.tolist(),
-                    "q": result.y[:nq].T.tolist(),
-                    "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
-                    "node_order": node_order,
-                    "body_dofs": body_dofs,
-                })
-
                 t_event = None
                 first_idx = -1
                 for ei, te_list in enumerate(result.t_events):
@@ -514,10 +500,6 @@ class Engine:
                             e = float(ed.get("restitution", 1.0))
                             new_state[nq_snap + idx_i] -= (1 + e) * vn * nx
                             new_state[nq_snap + idx_i + 1] -= (1 + e) * vn * ny
-                            # Positional separation from anchor
-                            sep = max(0.0, (bi.radius + ed.get("_anchor_r", 0.0)) - dist) * 0.5 + 1e-10
-                            new_state[idx_i] += sep * nx
-                            new_state[idx_i + 1] += sep * ny
                     else:
                         idx_j = self._body_dof_index(bj)
                         xj = new_state[idx_j]
@@ -545,13 +527,6 @@ class Engine:
                             new_state[nq_snap + idx_i + 1] += impulse / mi * ny
                             new_state[nq_snap + idx_j] -= impulse / mj * nx
                             new_state[nq_snap + idx_j + 1] -= impulse / mj * ny
-
-                            # Positional separation: push apart along normal to prevent re-trigger
-                            sep = max(0.0, (bi.radius + bj.radius) - dist) * 0.5 + 1e-10
-                            new_state[idx_i] += sep * nx
-                            new_state[idx_i + 1] += sep * ny
-                            new_state[idx_j] -= sep * nx
-                            new_state[idx_j + 1] -= sep * ny
 
                 elif etype == "tighten":
                     edge = ed["edge"]
@@ -612,7 +587,6 @@ class Engine:
                     "q": result.y[:nq].T.tolist(),
                     "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
                     "node_order": node_order,
-                    "body_dofs": body_dofs,
                     "complete": True,
                 })
                 break

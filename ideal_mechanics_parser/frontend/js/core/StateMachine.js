@@ -14,7 +14,6 @@ export class StateMachine {
     this._pausedDuration = 0;
     this.gravitationEnabled = false;
     this.trailsEnabled = false;
-    this._playSpeed = 1;
   }
 
   get selectedCount() {

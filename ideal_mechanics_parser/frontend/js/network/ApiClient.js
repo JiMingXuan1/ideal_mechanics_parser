@@ -14,7 +14,9 @@ export class ApiClient {
       try { const e = await resp.json(); if (e.error) msg = e.error; } catch {}
       throw new Error(msg);
     }
-    return resp.json();
+    const data = await resp.json();
+    if (window.__logger) window.__logger.logNetwork(topology, data);
+    return data;
   }
 
   streamSolve(topology, onChunk) {
@@ -42,6 +44,7 @@ export class ApiClient {
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const chunk = JSON.parse(line.slice(6));
+              if (window.__logger && 'q' in chunk) window.__logger.logNetwork(topology, chunk);
               onChunk(chunk);
               if (chunk.complete) resolve();
             }

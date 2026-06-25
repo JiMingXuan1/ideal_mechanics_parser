@@ -122,14 +122,7 @@ export class Renderer {
       if (entity.type === 'Anchor') {
         Entities.drawAnchor(ctx, s.x, s.y, isHover, isSel);
       } else if (entity.type === 'RigidBody') {
-        const len = (entity.params?.length || 2);
-        const wid = (entity.params?.width || 0.5);
-        const shape = entity.params?.shape || 'rect';
-        Entities.drawRigidBody(ctx, s.x, s.y, entity.theta || 0, isHover, isSel, id, {
-          length: len * this.camera.zoom,
-          width: wid * this.camera.zoom,
-          shape,
-        });
+        Entities.drawRigidBody(ctx, s.x, s.y, entity.theta || 0, isHover, isSel, id);
       } else {
         Entities.drawMassPoint(ctx, s.x, s.y, isHover, isSel, id);
       }
@@ -233,14 +226,7 @@ export class Renderer {
       const s = this.camera.worldToScreen(p.x, p.y);
       const ent = this.sm.getEntity(nid);
       if (ent && ent.type === 'RigidBody') {
-        const len = (ent.params?.length || 2);
-        const wid = (ent.params?.width || 0.5);
-        const shape = ent.params?.shape || 'rect';
-        Entities.drawRigidBody(ctx, s.x, s.y, p.theta, false, false, null, {
-          length: len * this.camera.zoom,
-          width: wid * this.camera.zoom,
-          shape,
-        });
+        Entities.drawRigidBody(ctx, s.x, s.y, p.theta, false, false);
       } else {
         Entities.drawMassPoint(ctx, s.x, s.y, false, false);
       }

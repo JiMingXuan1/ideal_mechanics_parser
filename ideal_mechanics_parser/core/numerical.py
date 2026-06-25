@@ -105,7 +105,7 @@ class NumericalIntegrator:
             events=events,
             atol=atol,
             rtol=rtol,
-            max_step=0.02,
+            max_step=0.1,
         )
 
         return result

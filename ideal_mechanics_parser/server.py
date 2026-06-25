@@ -9,22 +9,6 @@ from core.exceptions import TopologyError
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
 
 
-def _topology_has_events(topology):
-    """Check if topology requires event-driven simulation.
-
-    Events needed when any node has radius > 0 (collision) or any
-    edge is SoftRope.
-    """
-    for n in topology.get("nodes", []):
-        r = float(n.get("params", {}).get("radius", 0))
-        if r > 0:
-            return True
-    for e in topology.get("edges", []):
-        if e.get("type") == "SoftRope":
-            return True
-    return False
-
-
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, status, data):
         self.send_response(status)
@@ -74,31 +58,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from io_handler.parser import _validate
                 _validate(topology)
-
-                if _topology_has_events(topology):
-                    engine = Engine(topology)
-                    chunks = []
-                    engine.run_events(on_chunk=lambda c: chunks.append(c))
-                    result = {"t": [], "q": [], "qd": [], "node_order": [], "body_dofs": []}
-                    for c in chunks:
-                        if "error" in c:
-                            raise RuntimeError(c["error"])
-                        if "t" in c:
-                            if not result["t"]:
-                                result["node_order"] = c.get("node_order", [])
-                                result["body_dofs"] = c.get("body_dofs", [])
-                            result["t"].extend(c["t"])
-                            result["q"].extend(c["q"])
-                            if c.get("qd"):
-                                result["qd"].extend(c["qd"])
-                else:
-                    engine = Engine(topology)
-                    result = engine.run()
-
+                engine = Engine(topology)
+                result = engine.run()
                 self._send_json(200, result)
             except TopologyError as e:
                 self._send_error(422, str(e))
-            except (AssertionError, KeyError, ValueError, RuntimeError) as e:
+            except (AssertionError, KeyError, ValueError) as e:
                 self._send_error(422, str(e))
             except Exception as e:
                 tb = traceback.format_exc()
@@ -116,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
                 from io_handler.parser import _validate
                 _validate(topology)
                 engine = Engine(topology)
-                engine.run_events(on_chunk=lambda c: self._send_sse(c))
+                engine.run_stream(on_chunk=lambda c: self._send_sse(c))
                 self._send_sse({"complete": True})
             except TopologyError as e:
                 self._send_sse({"error": str(e), "complete": True})
