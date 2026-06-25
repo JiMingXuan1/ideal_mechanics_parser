@@ -30,8 +30,8 @@ new PropertiesPanel(document.getElementById('properties-panel'), eb, sm);
 new ErrorToast(eb);
 
 const graphBuilder = new GraphBuilder(sm);
-const validator = new Validator(sm);
 window.graphBuilder = graphBuilder;
+const validator = new Validator(sm);
 const apiClient = new ApiClient();
 window.apiClient = apiClient;
 
@@ -75,11 +75,11 @@ eb.on('HOVER', ({ id }) => { sm.hoveredEntityId = id; });
 eb.on('ADD_ENTITY', (data) => {
   const { type, x, y } = data;
   const id = uid('n');
-  const entity = { id, type, x, y, vx: data.vx || 0, vy: data.vy || 0, params: { m: 1.0 } };
+  const entity = { id, type, x, y, vx: data.vx || 0, vy: data.vy || 0, params: { m: 1.0, radius: 0.1 } };
   if (type === 'RigidBody') {
     entity.theta = data.theta || 0;
     entity.omega = data.omega || 0;
-    entity.params = data.params || { m: 1.0, I: 0.167 };
+    entity.params = data.params || { m: 1.0, shape: 'rect', length: 2, width: 0.5 };
   }
   sm.addEntity(entity);
   history.push({ undo: () => sm.removeEntity(id), redo: () => sm.addEntity({ ...entity }) });
@@ -151,6 +151,28 @@ eb.on('EDGE_END', ({ fromId, toId }) => {
 
 // --- Streaming + Playback ---
 
+function _startPlayback() {
+  if (sm._playTimer) return;
+  let _lastStatus = '';
+
+  sm._playStart = performance.now();
+  const tick = () => {
+    if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
+    if (sm.isPlaying) {
+      const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
+      const speed = sm._playSpeed || 1;
+      const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
+      sm.playhead = Math.min(elapsed * speed, latest);
+      const s = `${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`;
+      if (s !== _lastStatus) { _lastStatus = s; setStatus(`<span class="highlight">▶</span> t = ${s}`); }
+    } else {
+      setStatus(`<span class="highlight">⏸</span> t = ${sm.playhead.toFixed(2)}s / ${sm.trajectory.t[sm.trajectory.t.length-1].toFixed(1)}s`);
+    }
+    sm._playTimer = requestAnimationFrame(tick);
+  };
+  sm._playTimer = requestAnimationFrame(tick);
+}
+
 function _emitSimState() {
   if (sm.mode !== 'simulation') { eb.emit('SIM_STATE', 'stopped'); return; }
   eb.emit('SIM_STATE', sm.isPlaying ? 'playing' : 'paused');
@@ -186,6 +208,7 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
   sm._pausedAt = 0;
   _emitSimState();
 
+  // Streaming mode (handles both events and non-events via run_events)
   const allT = [], allQ = [];
 
   setStatus('Connecting to backend...');
@@ -200,26 +223,17 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
       return;
     }
     if (chunk.complete) return;
+    if (!chunk.t) return;  // skip event-only chunks
     allT.push(...chunk.t);
     allQ.push(...chunk.q);
-    sm.trajectory = { t: allT, q: allQ, node_order: chunk.node_order };
+    sm.trajectory = {
+      t: allT, q: allQ,
+      node_order: chunk.node_order,
+      body_dofs: sm.trajectory?.body_dofs || chunk.body_dofs,
+    };
+    if (chunk.qd) sm.trajectory.qd = sm.trajectory.qd ? [...sm.trajectory.qd, ...chunk.qd] : [...chunk.qd];
 
-    if (!sm._playTimer) {
-      sm._playStart = performance.now();
-      const tick = () => {
-        if (sm.mode !== 'simulation') { sm._playTimer = null; return; }
-        if (sm.isPlaying) {
-          const elapsed = (performance.now() - sm._playStart - sm._pausedDuration) / 1000;
-          const latest = sm.trajectory.t[sm.trajectory.t.length - 1];
-          sm.playhead = Math.min(elapsed, latest);
-          setStatus(`<span class="highlight">▶</span> t = ${sm.playhead.toFixed(2)}s / ${latest.toFixed(1)}s`);
-        } else {
-          setStatus(`<span class="highlight">⏸</span> t = ${sm.playhead.toFixed(2)}s / ${sm.trajectory.t[sm.trajectory.t.length-1].toFixed(1)}s`);
-        }
-        sm._playTimer = requestAnimationFrame(tick);
-      };
-      sm._playTimer = requestAnimationFrame(tick);
-    }
+    if (!sm._playTimer) _startPlayback();
   }).catch((err) => {
     if (sm.mode !== 'simulation') return;
     sm.mode = 'edit';

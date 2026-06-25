@@ -62,6 +62,7 @@ export class PropertiesPanel {
       });
     } else if (entity.type === 'MassPoint') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
+      this._inp('radius', entity.params.radius || 0.1, (v) => { entity.params.radius = v; });
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('vx', entity.vx || 0, (v) => { entity.vx = v; });
@@ -77,7 +78,9 @@ export class PropertiesPanel {
       });
     } else if (entity.type === 'RigidBody') {
       this._inp('m', entity.params.m || 1.0, (v) => { entity.params.m = v; });
-      this._inp('I', entity.params.I || 0.0, (v) => { entity.params.I = v; });
+      this._sel('shape', entity.params.shape || 'rect', ['rect', 'rod'], (v) => { entity.params.shape = v; });
+      this._inp('length', entity.params.length || 2.0, (v) => { entity.params.length = v; });
+      this._inp('width', entity.params.width || 0.5, (v) => { entity.params.width = v; });
       this._inp('x', entity.x, (v) => { entity.x = v; });
       this._inp('y', entity.y, (v) => { entity.y = v; });
       this._inp('theta', entity.theta || 0, (v) => { entity.theta = v; });
@@ -89,8 +92,7 @@ export class PropertiesPanel {
 
   _renderEdge(edge) {
     this._row('ID', edge.id);
-    this._sel('Type', edge.type,
-      ['IdealRod', 'IdealSpring', 'SmoothRail', 'FixedCoordinate', 'LinearRelation', 'DistanceSum', 'AngleConstraint', 'HingeJoint', 'SoftRope'],
+    this._sel('Type', edge.type, [...Object.keys(EDGE_FIELDS), 'SoftRope'],
       (nv) => {
         edge.type = nv;
         edge.params = {};
@@ -100,6 +102,26 @@ export class PropertiesPanel {
     );
     this._row('From', edge.from);
     if (edge.to) this._row('To', edge.to);
+
+    // Show pivot fields if connected to a RigidBody
+    const fromEnt = edge.from && this.sm.getEntity(edge.from);
+    const toEnt = edge.to && this.sm.getEntity(edge.to);
+    if (fromEnt && fromEnt.type === 'RigidBody') {
+      this._inp('from_pivot[u]', edge.params?.from_pivot?.[0] ?? 0, (v) => {
+        edge.params.from_pivot = [Number(v), edge.params.from_pivot?.[1] ?? 0];
+      });
+      this._inp('from_pivot[v]', edge.params?.from_pivot?.[1] ?? 0, (v) => {
+        edge.params.from_pivot = [edge.params.from_pivot?.[0] ?? 0, Number(v)];
+      });
+    }
+    if (toEnt && toEnt.type === 'RigidBody') {
+      this._inp('to_pivot[u]', edge.params?.to_pivot?.[0] ?? 0, (v) => {
+        edge.params.to_pivot = [Number(v), edge.params.to_pivot?.[1] ?? 0];
+      });
+      this._inp('to_pivot[v]', edge.params?.to_pivot?.[1] ?? 0, (v) => {
+        edge.params.to_pivot = [edge.params.to_pivot?.[0] ?? 0, Number(v)];
+      });
+    }
 
     const fields = EDGE_FIELDS[edge.type] || [];
     if (!edge.params) edge.params = {};
@@ -138,9 +160,9 @@ export class PropertiesPanel {
     d.innerHTML = `<label>${key}</label><input type="text" value="${value}" />`;
     const inp = d.querySelector('input');
     inp.addEventListener('input', () => {
-      const raw = inp.value;
-      const n = parseFloat(raw);
-      onChange(isNaN(n) ? raw : n);
+      const raw = inp.value.trim();
+      const n = Number(raw);
+      onChange(raw === '' ? value : (Number.isFinite(n) ? n : raw));
     });
     this._body.appendChild(d);
   }

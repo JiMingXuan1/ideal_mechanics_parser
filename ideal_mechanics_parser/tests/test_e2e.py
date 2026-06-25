@@ -181,7 +181,8 @@ class TestE2E:
         """)
 
         _click_run(p)
-        time.sleep(3)
+        # Wait for trajectory data to arrive and network log to fire
+        time.sleep(5)
 
         # Export dump
         dump = _logger_dump(p)
@@ -190,7 +191,12 @@ class TestE2E:
         assert "stateMachine" in dump, "No stateMachine in dump"
         assert len(dump["logs"]) > 0, "Empty log queue"
         assert dump["stateMachine"]["hasTrajectory"] or True, "No trajectory state"
-        print(f"Logger: {len(dump['logs'])} events, {dump['stateMachine']['entities']} entities")
+
+        # Verify network logs exist
+        net_logs = [l for l in dump["logs"] if l.get("type") == "network"]
+        event_logs = [l for l in dump["logs"] if l.get("type") == "event"]
+        print(f"Logger: {len(dump['logs'])} total, {len(net_logs)} network, {len(event_logs)} events")
+        assert len(net_logs) > 0, "No network logs captured - streaming may not have arrived yet"
 
 
 # ─── Fixture override with Playwright ─────────────────────────────

@@ -2,7 +2,7 @@ import numpy as np
 from .exceptions import ProjectionError
 
 
-def project_initial_state(q0, qd0, constraints_func, jacobian_func, max_iter=50, tol=1e-12, extra_args=None):
+def project_initial_state(q0, qd0, constraints_func, jacobian_func, max_iter=50, tol=1e-12, extra_args=None, context=None):
     q = q0.copy()
     args = extra_args or []
 
@@ -17,8 +17,15 @@ def project_initial_state(q0, qd0, constraints_func, jacobian_func, max_iter=50,
         delta = J_pinv @ f_val
         q = q - delta
 
-    raise ProjectionError(
-        f"Newton-Raphson did not converge after {max_iter} iterations. "
-        f"Final residual: {np.linalg.norm(constraints_func(*q, *args)):.2e}. "
-        "Initial topology is invalid!"
+    from .exceptions import ProjectionError
+    msg = (
+        f"Newton-Raphson did not converge after {max_iter} iterations.\n"
+        f"Final residual: {error:.2e}.\n"
+        f"Constraint vector (first 3): {f_val[:3].tolist()}\n"
+        f"Jacobian norm: {np.linalg.norm(J):.2e}\n"
     )
+    if context:
+        msg += f"Constraints: {context.get('expressions', [])}\n"
+        msg += f"Initial position q0: {q0.tolist()}\n"
+    msg += "Initial topology is invalid! Check that constraints reference dynamic bodies, not Anchors."
+    raise ProjectionError(msg)

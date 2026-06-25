@@ -109,10 +109,50 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  _drawPivots() {
+    const ctx = this.ctx;
+    for (const [id, edge] of this.sm.edges) {
+      const fromEnt = this.sm.getEntity(edge.from);
+      const fromPivot = edge.params?.from_pivot;
+      if (fromEnt && fromEnt.type === 'RigidBody' && fromPivot) {
+        const theta = fromEnt.theta || 0;
+        const ct = Math.cos(theta), st = Math.sin(theta);
+        const wx = fromEnt.x + fromPivot[0] * ct - fromPivot[1] * st;
+        const wy = fromEnt.y + fromPivot[0] * st + fromPivot[1] * ct;
+        const s = this.camera.worldToScreen(wx, wy);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#8250df';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      const toPivot = edge.params?.to_pivot;
+      const toEnt = edge.to && this.sm.getEntity(edge.to);
+      if (toEnt && toEnt.type === 'RigidBody' && toPivot) {
+        const theta = toEnt.theta || 0;
+        const ct = Math.cos(theta), st = Math.sin(theta);
+        const wx = toEnt.x + toPivot[0] * ct - toPivot[1] * st;
+        const wy = toEnt.y + toPivot[0] * st + toPivot[1] * ct;
+        const s = this.camera.worldToScreen(wx, wy);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#8250df';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
+
   _drawEntities() {
     const ctx = this.ctx;
     const sel = this.sm.selectedEntityIds;
     const hover = this.sm.hoveredEntityId;
+
+    this._drawPivots();
 
     for (const [id, entity] of this.sm.entities) {
       const s = this.camera.worldToScreen(entity.x, entity.y);
@@ -122,7 +162,14 @@ export class Renderer {
       if (entity.type === 'Anchor') {
         Entities.drawAnchor(ctx, s.x, s.y, isHover, isSel);
       } else if (entity.type === 'RigidBody') {
-        Entities.drawRigidBody(ctx, s.x, s.y, entity.theta || 0, isHover, isSel, id);
+        const len = (entity.params?.length || 2);
+        const wid = (entity.params?.width || 0.5);
+        const shape = entity.params?.shape || 'rect';
+        Entities.drawRigidBody(ctx, s.x, s.y, entity.theta || 0, isHover, isSel, id, {
+          length: len * this.camera.zoom,
+          width: wid * this.camera.zoom,
+          shape,
+        });
       } else {
         Entities.drawMassPoint(ctx, s.x, s.y, isHover, isSel, id);
       }
@@ -226,7 +273,14 @@ export class Renderer {
       const s = this.camera.worldToScreen(p.x, p.y);
       const ent = this.sm.getEntity(nid);
       if (ent && ent.type === 'RigidBody') {
-        Entities.drawRigidBody(ctx, s.x, s.y, p.theta, false, false);
+        const len = (ent.params?.length || 2);
+        const wid = (ent.params?.width || 0.5);
+        const shape = ent.params?.shape || 'rect';
+        Entities.drawRigidBody(ctx, s.x, s.y, p.theta, false, false, null, {
+          length: len * this.camera.zoom,
+          width: wid * this.camera.zoom,
+          shape,
+        });
       } else {
         Entities.drawMassPoint(ctx, s.x, s.y, false, false);
       }

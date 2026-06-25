@@ -1,4 +1,4 @@
-const MAX_LOG = 200;
+const MAX_LOG = 500;
 
 export class Logger {
   constructor(eventBus, stateMachine) {
