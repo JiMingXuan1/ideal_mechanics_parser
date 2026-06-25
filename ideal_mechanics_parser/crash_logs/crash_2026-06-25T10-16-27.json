@@ -1,0 +1,90 @@
+{
+  "version": "0d4774c",
+  "exportedAt": "2026-06-25T10:16:27.464Z",
+  "stateMachine": {
+    "mode": "simulation",
+    "viewPlane": "XY",
+    "gravitationEnabled": false,
+    "trailsEnabled": false,
+    "playhead": 2.95710000000149,
+    "hasTrajectory": true,
+    "entities": [
+      {
+        "id": "n1",
+        "type": "MassPoint",
+        "x": -7.25,
+        "y": 0,
+        "vx": 1,
+        "vy": 0,
+        "params": {
+          "m": 1,
+          "radius": 0.1
+        }
+      },
+      {
+        "id": "n2",
+        "type": "MassPoint",
+        "x": -2.25,
+        "y": 0,
+        "vx": -1,
+        "vy": 0,
+        "params": {
+          "m": 1,
+          "radius": 0.1
+        }
+      }
+    ],
+    "edges": []
+  },
+  "logs": [
+    {
+      "id": 1,
+      "t": 1782382584404,
+      "type": "event",
+      "name": "ADD_ENTITY",
+      "payload": {
+        "type": "MassPoint",
+        "x": -7.25,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "t": 1782382584404,
+      "type": "event",
+      "name": "SELECT",
+      "payload": {
+        "id": "n1",
+        "isEdge": false
+      }
+    },
+    {
+      "id": 3,
+      "t": 1782382584453,
+      "type": "event",
+      "name": "ADD_ENTITY",
+      "payload": {
+        "type": "MassPoint",
+        "x": -2.25,
+        "y": 0
+      }
+    },
+    {
+      "id": 4,
+      "t": 1782382584453,
+      "type": "event",
+      "name": "SELECT",
+      "payload": {
+        "id": "n2",
+        "isEdge": false
+      }
+    },
+    {
+      "id": 5,
+      "t": 1782382584459,
+      "type": "event",
+      "name": "CMD_SIMULATION_START_GUI",
+      "payload": "undefined"
+    }
+  ]
+}

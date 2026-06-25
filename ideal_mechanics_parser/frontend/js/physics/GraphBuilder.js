@@ -11,7 +11,7 @@ export class GraphBuilder {
       duration: this.sm._simDuration || 300,
     };
     if (this.sm.gravitationEnabled) {
-      env.gravitation = { enabled: true, G: 1.0, epsilon: 0.001 };
+      env.gravitation = { enabled: true, G: 0.000295912208, epsilon: 0.001 };
     }
 
     const nodes = [];

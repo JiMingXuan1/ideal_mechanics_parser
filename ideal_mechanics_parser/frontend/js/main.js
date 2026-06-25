@@ -12,11 +12,11 @@ import { Console } from './ui/Console.js';
 import { PropertiesPanel } from './ui/PropertiesPanel.js';
 import { ErrorToast } from './ui/ErrorToast.js';
 import { uid } from './core/utils.js';
-
 import { Logger } from './core/Logger.js';
 
 const eb = new EventBus();
 const sm = new StateMachine();
+window.sm = sm;
 window.__logger = new Logger(eb, sm);
 const history = new CommandHistory();
 const camera = new Camera();
@@ -31,7 +31,9 @@ new ErrorToast(eb);
 
 const graphBuilder = new GraphBuilder(sm);
 const validator = new Validator(sm);
+window.graphBuilder = graphBuilder;
 const apiClient = new ApiClient();
+window.apiClient = apiClient;
 
 const statusEl = document.getElementById('status-text');
 
