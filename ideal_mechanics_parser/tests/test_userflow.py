@@ -18,6 +18,19 @@ def _get_traj(page, timeout=30, min_frames=50):
         time.sleep(0.1)
     return None
 
+def _wait_traj_end(page, timeout=90):
+    """Poll until the streamed trajectory reaches its final sample
+    (last_t >= 9.99 for the default 10s duration)."""
+    end = time.time() + timeout
+    last = None
+    while time.time() < end:
+        d = page.evaluate("(()=>{var t=window.sm.trajectory;if(!t||!t.t.length)return null;return{t:t.t.length,last_t:t.t[t.t.length-1]}})()")
+        if d and d["last_t"] >= 9.99:
+            return d
+        last = d
+        time.sleep(0.2)
+    return last
+
 def _server():
     s = socket.socket(); s.bind(("", 0)); p = s.getsockname()[1]; s.close()
     proc = subprocess.Popen([sys.executable, os.path.join(SERVER_DIR, "server.py"), str(p)],
@@ -78,8 +91,8 @@ class TestUserFlow:
             p.click("canvas", position={"x": 300, "y": 360})
             time.sleep(0.1)
             _click_run(p)
-            t = _get_traj(p, timeout=90, min_frames=100)
-            assert t is not None, "No trajectory"
+            t = _wait_traj_end(p)
+            assert t is not None, "Trajectory never reached the end of the stream"
             assert t["last_t"] >= 9.99, \
                 f"Trajectory should reach full 10s duration, got {t['last_t']}"
         self._flow(fn)
