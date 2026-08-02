@@ -4,6 +4,8 @@
 
 在后端，它是 SymPy 符号推导 + SciPy Radau 隐式积分 + 最大坐标法的多体动力学引擎；在前端，它是纯粹的 HTML5 Canvas + Vanilla JS，零框架依赖。
 
+[![CI](https://github.com/JiMingXuan1/ideal_mechanics_parser/actions/workflows/ci.yml/badge.svg)](https://github.com/JiMingXuan1/ideal_mechanics_parser/actions/workflows/ci.yml)
+
 ---
 
 ## 快速开始
@@ -15,6 +17,14 @@ python server.py
 ```
 
 浏览器打开 `http://localhost:8000`。
+
+运行测试：
+
+```bash
+pytest tests/ -v
+```
+
+当前 **127 个测试**全部通过，覆盖：单摆周期、弹簧频率、双摆守恒、约束漂移、投影收敛、奇异 Jacobian、表达式注入、碰撞检测（质点/杆/矩形/锚点）、静止接触、软绳绷紧与松弛、角动量守恒、刚体铰接、API 端到端、浏览器 E2E。
 
 ---
 
@@ -34,7 +44,6 @@ python server.py
 │                                    │ m: [1.0] ││
 │                                    │ ...      ││
 │                                    └──────────┘│
-│                                    ┌──────────┐│
 │  ══════════════════════════════════│ > gamemode││  控制台（底部）
 │                                    └──────────┘│
 └────────────────────────────────────────────────┘
@@ -63,9 +72,9 @@ python server.py
 
 选中任意实体或边后，右下角出现属性面板。可修改：
 
-- **质点**：`m`（质量）、`x/y`（初始位置）、`vx/vy`（初始速度）
+- **质点**：`m`（质量）、`radius`（碰撞半径）、`x/y`（初始位置）、`vx/vy`（初始速度）、`Fx(t)/Fy(t)`（外力表达式）
 - **刚体**：`m`（质量）、`shape`（rect/rod）、`length`、`width`、`x/y/theta`、`vx/vy/omega`
-- **锚点**：`x/y`
+- **锚点**：`x/y`、`radius`（碰撞半径）、`x_expr/y_expr`（移动锚点）
 - **边**：根据类型显示不同参数（杆长、弹簧系数、铰接偏移……）。连接刚体时出现 `from_pivot[u/v]` / `to_pivot[u/v]` 附着点偏移输入。
 
 ### 控制台
@@ -79,12 +88,13 @@ python server.py
 | `gamemode g` 或 `gravity universal on/off` | 切换万有引力（G=1 demo 模式） |
 | `speed <factor>` | 设置播放速度（1=正常，10=10倍） |
 | `trails on/off` | 显示/隐藏运动轨迹 |
-| `duration <sec>` | 设置仿真时长（秒） |
+| `duration <sec>` | 设置仿真时长（秒，默认 10） |
 | `run` | 开始仿真 |
 | `stop` | 停止仿真 |
 | `set n1 x 5` | 设置实体 `n1` 的属性 `x` 为 5 |
 | `undo` | 撤销上一步 |
 | `redo` | 重做 |
+| `dump_log` | 导出调试日志（JSON） |
 | `help` | 查看所有命令 |
 
 ---
@@ -95,9 +105,9 @@ python server.py
 
 | 类型 | 图标 | 自由度 | 说明 |
 |------|------|--------|------|
-| **Anchor** | 菱形 + 十字 | — | 固定锚点，不可移动 |
-| **MassPoint** | 蓝圆 | `(x, y)` | 质点，受重力/约束 |
-| **RigidBody** | 矩形/线段 + 方向线 | `(x, y, θ)` | 刚体，支持转动和铰接。`I` 自动计算（匀质杆 `¹⁄₁₂mL²`、矩形 `¹⁄₁₂m(L²+W²)`） |
+| **Anchor** | 菱形 + 十字 | — | 固定锚点，不可移动；`radius > 0` 时可作碰撞墙/地面 |
+| **MassPoint** | 蓝圆 | `(x, y)` | 质点，受重力/约束；`radius` 决定碰撞半径 |
+| **RigidBody** | 矩形/线段 + 方向线 | `(x, y, θ)` | 刚体，支持转动和铰接。`I` 自动计算（匀质杆 `¹⁄₁₂mL²`、矩形 `¹⁄₁₂m(L²+W²)`），也可手动指定 |
 
 ### 边
 
@@ -105,25 +115,31 @@ python server.py
 |------|------|------|------|
 | **IdealRod** (轻杆) | 实线 + label | 两节点距离恒定：`‖p₁-p₂‖² = L²` | `length` |
 | **IdealSpring** (弹簧) | 锯齿线 | 弹性势能：`½k(d-l₀)²` | `k`（刚度）, `l0`（原长） |
-| **SmoothRail** (轨道) | 虚线 | 约束在曲线 `f(x,y,t)=0` 上 | `expr`（SymPy 表达式） |
+| **SmoothRail** (轨道) | 虚线 | 约束在曲线 `f(x,y,t)=0` 上（约束边连接的那个动态节点） | `expr`（SymPy 表达式） |
 | **FixedCoordinate** (定坐标) | 圆 + 十字 | 锁定单坐标 `x=c` 或 `y=c` | `coord`（x/y）, `value` |
 | **LinearRelation** (线性关系) | 虚线 | 多坐标线性组合=常数 | `coeffs`, `constant` |
 | **DistanceSum** (滑轮绳) | 虚线 + 过滑轮 | 总绳长恒定 | `via_id`（滑轮节点）, `length` |
 | **AngleConstraint** (定角) | 实线 + 角度 | 连线与水平夹角固定 | `angle`（弧度） |
 | **HingeJoint** (铰接) | ⭕ | 刚体局部点→世界点/另一节点 | `pivot`, `world`/`to` |
-| **SoftRope** (软绳) | — | 松弛→绷紧自动切换（实验性） | `length` |
+| **SoftRope** (软绳) | — | 松弛→绷紧→松弛自动切换；绷紧瞬间做完全非弹性冲击 | `length` |
 
 ### 附着点
 
 边连接刚体时，可以在属性面板中指定 `from_pivot[u/v]` / `to_pivot[u/v]`（局部坐标偏移）。附着点以紫色圆点显示在刚体上，支持拖拽。
 
-碰撞检测支持 **质点到杆** 和 **杆到杆** 模式，碰撞冲量包括角动量效应（r × J → Δω）。
+### 碰撞
+
+- **支持几何**：质点到质点（圆-圆）、质点到杆（胶囊）、质点到矩形、杆到杆、任意动态体到锚点（墙/地面）。
+- **事件驱动**：solve_ivp 终止事件在接触瞬间触发，碰撞冲量含角动量效应（r × J → Δω）。
+- **静止接触**：残余法向速度低于阈值时自动转为双边距离约束（接触力），不再抖动或死循环；当接触变为拉力时自动释放。
+- **双向反弹**：从锚圆内部坠出的物体同样会被弹回（不再穿模）。
+- `restitution`（恢复系数，默认 1.0）可在 `system_env` 中设置。
 
 ---
 
-## 表达式注入（逃生舱）
+## 表达式注入
 
-核心特性：在数字字段填入 **数学函数表达式**（不是数字），后端用 SymPy 安全解析。
+核心特性：在数字字段填入 **数学函数表达式**（不是数字），后端用 SymPy 安全解析（仅允许白名单函数与符号，见下）。
 
 ### 移动锚点
 
@@ -143,7 +159,7 @@ x_expr: "2*sin(pi*t)"   → 锚点简谐运动
 
 ```
 Fx(t): "10*sin(2*pi*t)"   → 周期驱动力
-Fy(t): "m*g"              → 抵消重力（m=质量，g=9.81）
+Fy(t): "m*g"              → 抵消重力（m=该质点质量，g=重力加速度）
 Fx(t): "5.0"              → 恒力 5N
 ```
 
@@ -159,14 +175,14 @@ x**2 + y**2 - 4 → 半径 2 的圆轨道
 y - sin(x)      → 正弦波轨道
 ```
 
-轨道方程可以使用 `x`、`y`（质点的坐标）和 `t`（时间）。
+轨道方程可以使用 `x`、`y`（被约束质点的坐标）和 `t`（时间）。
 
 ### 可用函数
 
 ```
 sin  cos  tan  pi  exp  sqrt  Abs  log
 asin  acos  atan  sinh  cosh  tanh
-t  (时间变量)
+t  (时间变量)    m  (外力表达式中的质点质量)    g  (重力加速度)
 ```
 
 ---
@@ -181,12 +197,13 @@ t  (时间变量)
     "view_plane": "XY",
     "gravity": 9.81,
     "time_step": 0.01,
-    "duration": 10.0
+    "duration": 10.0,
+    "restitution": 1.0
   },
   "nodes": [
     {"id": "n1", "type": "Anchor", "init_pos": [0, 0]},
     {"id": "n2", "type": "MassPoint",
-     "params": {"m": 1.0, "external_force_x_expr": "5*sin(t)"},
+     "params": {"m": 1.0, "radius": 0.1, "external_force_x_expr": "5*sin(t)"},
      "init_state": {"x": 2, "y": 0, "vx": 0, "vy": 0}}
   ],
   "edges": [
@@ -209,6 +226,8 @@ t  (时间变量)
 ```
 
 `body_dofs` 指示每个节点在 `q` 中占几个自由度（质点=2，刚体=3）。
+
+> `POST /solve` 自动路由：拓扑中含 `radius > 0` 的节点或 SoftRope 边时走事件驱动路径（碰撞/软绳），否则走批量路径。`POST /solve/stream` 提供 SSE 流式输出。
 
 命令行求解：
 
@@ -241,18 +260,9 @@ JSON 拓扑 → Step 1: 符号实例化 → Step 1.5: N-R 投影
 
 - **最大坐标法**：每个质点 `(x, y)` 是独立自由度，约束通过拉格朗日乘子法处理
 - **拉格朗日方程**：`L = T - V` → `LagrangesMethod` 自动推导运动方程
-- **Baumgarte 稳定化**：`α=β=1` 消除约束漂移
+- **Baumgarte 稳定化**：`α=β=1` 消除约束漂移（单摆 5s 能量漂移 ~1e-11）
 - **Radau IIA**：5 阶隐式 Runge-Kutta，适合 DAE 系统
-
----
-
-## 运行测试
-
-```bash
-pytest tests/ -v
-```
-
-当前 **63 个测试**全部通过，覆盖：单摆周期、弹簧频率、双摆守恒、约束漂移、投影收敛、奇异 Jacobian、表达式注入、碰撞检测、软绳绷紧、角动量守恒、刚体铰接、API 端到端。
+- **事件驱动**：碰撞/软绳通过 `solve_ivp` 终止事件 + 中断重启循环实现；静止接触与绷紧绳索通过约束乘子符号自动增删约束
 
 ---
 

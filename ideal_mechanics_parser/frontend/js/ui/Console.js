@@ -86,7 +86,7 @@ export class Console {
           return;
         }
         this.sm._simDuration = dur;
-        this._log('success', `Simulation duration set to ${dur}s (default 300s)`);
+        this._log('success', `Simulation duration set to ${dur}s (default 10s)`);
         break;
       }
       case 'run': {
@@ -140,7 +140,7 @@ export class Console {
         this._log('info', '  speed <factor>   — Set playback speed (1=normal, 10=10x)');
         this._log('info', '  gravity universal on|off — Toggle N-body gravity');
         this._log('info', '  trails on|off          — Show/hide motion trails');
-        this._log('info', '  duration <sec>  — Set max sim time (default 300)');
+        this._log('info', '  duration <sec>  — Set max sim time (default 10)');
         this._log('info', '  run / stop      — Start / stop simulation');
         this._log('info', '  Space           — Pause / resume (while running)');
         this._log('info', '  ← / →           — Step frame by frame (paused)');
