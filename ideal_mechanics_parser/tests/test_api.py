@@ -4,6 +4,7 @@ Starts a real server subprocess and sends HTTP requests with urllib.
 """
 
 import json
+import os
 import time
 import subprocess
 import urllib.request
@@ -15,6 +16,7 @@ import numpy as np
 SERVER_PORT = 18923  # unlikely to conflict
 SERVER_URL = f"http://127.0.0.1:{SERVER_PORT}"
 SERVER_SCRIPT = "server.py"
+SERVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────
@@ -24,8 +26,7 @@ def server():
     """Start the HTTP server in a subprocess, yield when ready, kill on teardown."""
     proc = subprocess.Popen(
             ["python", SERVER_SCRIPT, str(SERVER_PORT)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            cwd="C:/Users/Ji20081202/Documents/IMP/ideal_mechanics_parser",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=SERVER_DIR,
         )
 
     # Wait for server to be ready (up to 10 s)

@@ -2,6 +2,12 @@ import sympy as sp
 from safety.sympify_sandbox import safe_sympify
 
 
+def _rod_constraint(a_px, a_py, b_px, b_py, length):
+    dx = a_px - b_px
+    dy = a_py - b_py
+    return dx**2 + dy**2 - length**2
+
+
 def _world_pivot(body, pivot_offset=None):
     """Return symbolic (x, y) of body's pivot point in world coordinates.
 
@@ -48,10 +54,13 @@ def harvest_constraints(edges, sm):
         if e.type == "IdealRod":
             if b_px is None:
                 raise ValueError("IdealRod requires 'to' node")
-            dx = a_px - b_px
-            dy = a_py - b_py
-            f = dx**2 + dy**2 - e.length**2
-            holonomic.append(f)
+            holonomic.append(_rod_constraint(a_px, a_py, b_px, b_py, e.length))
+
+        elif e.type == "SoftRope":
+            if getattr(e, "_tight", False):
+                if b_px is None:
+                    raise ValueError("SoftRope requires 'to' node")
+                holonomic.append(_rod_constraint(a_px, a_py, b_px, b_py, e.length))
 
         elif e.type == "SmoothRail":
             # The rail expression constrains a MassPoint to the curve f(x,y,t)=0.

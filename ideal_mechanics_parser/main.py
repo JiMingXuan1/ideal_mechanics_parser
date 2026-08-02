@@ -17,7 +17,7 @@ def main():
     topology = parse_json(input_path)
 
     engine = Engine(topology)
-    results = engine.run()
+    results = engine.run_all()
 
     os.makedirs("output", exist_ok=True)
     base = os.path.splitext(os.path.basename(input_path))[0]

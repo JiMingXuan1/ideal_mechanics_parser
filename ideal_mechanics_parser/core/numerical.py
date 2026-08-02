@@ -49,7 +49,8 @@ class NumericalIntegrator:
         else:
             self._ext_force_funcs = None
 
-    def rhs(self, t, state):
+    def _solve_dae(self, t, state):
+        """Solve the DAE at (t, state): return (qdd, multipliers)."""
         q = state[:self.nq]
         qd = state[self.nq:]
 
@@ -72,7 +73,17 @@ class NumericalIntegrator:
 
         sol = np.linalg.lstsq(M_full, F_full, rcond=None)[0].ravel()
         qdd = sol[self.nq:2 * self.nq]
-        return np.concatenate([qd, qdd])
+        lams = sol[2 * self.nq:2 * self.nq + self.nc]
+        return qdd, lams
+
+    def rhs(self, t, state):
+        qdd, _ = self._solve_dae(t, state)
+        return np.concatenate([state[self.nq:], qdd])
+
+    def multipliers(self, t, state):
+        """Evaluate Lagrange multipliers (constraint forces) at (t, state)."""
+        _, lams = self._solve_dae(t, state)
+        return lams
 
     def integrate(self, q0, qd0, t_eval, method="Radau", atol=1e-10, rtol=1e-10):
         state0 = np.concatenate([q0, qd0])
