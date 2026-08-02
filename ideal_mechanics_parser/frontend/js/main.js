@@ -222,8 +222,10 @@ eb.on('CMD_SIMULATION_START_GUI', () => {
       _emitSimState();
       return;
     }
-    if (chunk.complete) return;
     if (!chunk.t) return;  // skip event-only chunks
+    // Note: the final chunk carries both data and complete:true — its data
+    // must be appended too, otherwise the last segment is lost and playback
+    // stops short of the requested duration.
     allT.push(...chunk.t);
     allQ.push(...chunk.q);
     sm.trajectory = {

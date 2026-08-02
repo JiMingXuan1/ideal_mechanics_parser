@@ -70,6 +70,20 @@ class TestUserFlow:
             assert t["f"] >= 5
         self._flow(fn)
 
+    def test_trajectory_reaches_full_duration(self):
+        """Regression: the final SSE chunk (complete:true) must not be
+        dropped, otherwise playback stops at 9.5s instead of 10s."""
+        def fn(p, port):
+            _click_tool(p, "Point")
+            p.click("canvas", position={"x": 300, "y": 360})
+            time.sleep(0.1)
+            _click_run(p)
+            t = _get_traj(p, timeout=90, min_frames=100)
+            assert t is not None, "No trajectory"
+            assert t["last_t"] >= 9.99, \
+                f"Trajectory should reach full 10s duration, got {t['last_t']}"
+        self._flow(fn)
+
     def test_collision_bounces(self):
         def fn(p, port):
             _click_tool(p, "Point")
