@@ -56,6 +56,49 @@ def test_point_hits_rod_end():
         assert rod_omega != 0, "Rod should rotate from off-center hit"
 
 
+def test_point_crossing_rod_center_bounces():
+    """A point crossing a rod must not tunnel through between solver steps."""
+    top = {
+        "system_env": {"view_plane": "XY", "gravity": 0, "duration": 2.0,
+                       "time_step": 0.01, "max_mutations": 10},
+        "nodes": [
+            {"id": "point", "type": "MassPoint", "params": {"m": 1, "radius": 0.1},
+             "init_state": {"x": 0, "y": 1.013, "vx": 0, "vy": -1}},
+            {"id": "rod", "type": "RigidBody",
+             "params": {"m": 1000, "shape": "rod", "length": 2, "width": 0.5},
+             "init_state": {"x": 0, "y": 0, "theta": 0, "vx": 0, "vy": 0, "omega": 0}},
+        ],
+        "edges": [],
+    }
+    chunks = []
+    Engine(top).run_events(on_chunk=chunks.append)
+    events = [chunk for chunk in chunks if "event" in chunk]
+    qd = np.array(next(chunk for chunk in reversed(chunks) if "qd" in chunk)["qd"])
+
+    assert len(events) == 1
+    assert qd[-1, 1] > 0, "Point should leave the rod after impact"
+
+
+def test_point_radius_is_included_for_rod_collision():
+    """A point circle grazing a rod must collide before its center reaches it."""
+    top = {
+        "system_env": {"view_plane": "XY", "gravity": 0, "duration": 2.0,
+                       "time_step": 0.01, "max_mutations": 10},
+        "nodes": [
+            {"id": "point", "type": "MassPoint", "params": {"m": 1, "radius": 0.1},
+             "init_state": {"x": 0, "y": 0.3, "vx": 2, "vy": 0}},
+            {"id": "rod", "type": "RigidBody",
+             "params": {"m": 1000, "shape": "rod", "length": 2, "width": 0.5},
+             "init_state": {"x": 2, "y": 0, "theta": 0, "vx": 0, "vy": 0, "omega": 0}},
+        ],
+        "edges": [],
+    }
+    chunks = []
+    Engine(top).run_events(on_chunk=chunks.append)
+
+    assert len([chunk for chunk in chunks if "event" in chunk]) == 1
+
+
 def test_rod_vs_rod_cross():
     """Two rods at 90 degree angle: cross collision."""
     top = {

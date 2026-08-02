@@ -13,7 +13,7 @@ export class GraphBuilder {
       view_plane: this.sm.viewPlane,
       gravity: this.sm.viewPlane === 'XZ' ? 9.81 : 0,
       time_step: 0.01,
-      duration: this.sm._simDuration || 300,
+      duration: this.sm._simDuration || 10,
     };
     if (this.sm.gravitationEnabled) {
       env.gravitation = { enabled: true, G: 1.0, epsilon: 0.001 };

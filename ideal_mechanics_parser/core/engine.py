@@ -337,10 +337,11 @@ class Engine:
         # We store theta_sym, idx etc for state access
         return L, W
 
-    def _event_point_vs_rod(self, mp_idx, rb_idx, L):
+    def _event_point_vs_rod(self, mp_idx, rb_idx, L, contact_radius):
         """Point-to-line-segment collision event.
 
-        Returns dx^2 where dx is the shortest distance from point to rod segment.
+        Returns signed separation from the rod capsule.  Event functions must
+        cross zero; a squared distance never becomes negative on penetration.
         """
         half = L / 2.0
         def event(t, state):
@@ -362,15 +363,15 @@ class Engine:
             cy2 = ay + t_param * aby
             dx = px - cx2
             dy = py - cy2
-            return dx * dx + dy * dy
+            return np.sqrt(dx * dx + dy * dy) - contact_radius
         event.terminal = True
         event.direction = 0
         return event
 
-    def _event_point_vs_rect(self, mp_idx, rb_idx, L, W):
+    def _event_point_vs_rect(self, mp_idx, rb_idx, L, W, point_radius):
         """Point-to-rectangle collision event.
 
-        Returns the squared distance from point to the nearest point on the rect.
+        Returns signed separation between the point circle and the rectangle.
         """
         half_l = L / 2.0
         half_w = W / 2.0
@@ -389,12 +390,12 @@ class Engine:
             nearest_y = max(-half_w, min(half_w, local_y))
             rx = local_x - nearest_x
             ry = local_y - nearest_y
-            return rx * rx + ry * ry
+            return np.sqrt(rx * rx + ry * ry) - point_radius
         event.terminal = True
         event.direction = 0
         return event
 
-    def _event_rod_vs_rod(self, idx_a, idx_b, L_a, L_b):
+    def _event_rod_vs_rod(self, idx_a, idx_b, L_a, L_b, contact_radius):
         """Segment-to-segment shortest-distance collision event."""
         half_a = L_a / 2.0
         half_b = L_b / 2.0
@@ -416,7 +417,7 @@ class Engine:
             # Shortest distance between two segments
             # Using geometric approach: check endpoints vs other segment, plus segment intersection
             d = _segment_distance(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y)
-            return d * d
+            return d - contact_radius
         event.terminal = True
         event.direction = 0
         return event
@@ -536,12 +537,19 @@ class Engine:
                 is_point = not (hasattr(bi, "theta_sym") and bi.theta_sym is not None)
                 if is_point:
                     if shape_b == "rod":
-                        func = self._event_point_vs_rod(idx_i, idx_j, L_b)
+                        contact_radius = getattr(bi, "radius", 0.0) + W_b / 2.0
+                        func = self._event_point_vs_rod(idx_i, idx_j, L_b, contact_radius)
+                        geometry = "point_rod"
                     else:
-                        func = self._event_point_vs_rect(idx_i, idx_j, L_b, W_b)
+                        contact_radius = getattr(bi, "radius", 0.0)
+                        func = self._event_point_vs_rect(idx_i, idx_j, L_b, W_b, contact_radius)
+                        geometry = "point_rect"
                 elif shape_b == "rod":
                     L_a = float(bi.params.get("length", 2.0))
-                    func = self._event_rod_vs_rod(idx_i, idx_j, L_a, L_b)
+                    W_a = float(bi.params.get("width", 0.5))
+                    contact_radius = (W_a + W_b) / 2.0
+                    func = self._event_rod_vs_rod(idx_i, idx_j, L_a, L_b, contact_radius)
+                    geometry = "rod_rod"
                 else:
                     # rect-vs-rect can be added later; skip for now
                     continue
@@ -554,8 +562,45 @@ class Engine:
                     "body_i": bi,
                     "body_j": bj,
                     "restitution": restitution,
+                    "geometry": geometry,
                 })
         return events
+
+    def _rigid_contact_normal(self, event_def, state):
+        """Return the contact normal pointing from body_j to body_i.
+
+        The center-to-center vector is wrong for an off-center hit on a rod or
+        rectangle, so derive the normal from the closest point on the shape.
+        """
+        if event_def.get("geometry") not in {"point_rod", "point_rect"}:
+            return None
+
+        point = event_def["body_i"]
+        rigid = event_def["body_j"]
+        point_idx = self._body_dof_index(point)
+        rigid_idx = self._body_dof_index(rigid)
+        px, py = state[point_idx], state[point_idx + 1]
+        cx, cy, theta = state[rigid_idx], state[rigid_idx + 1], state[rigid_idx + 2]
+        ct, st = np.cos(theta), np.sin(theta)
+        local_x = (px - cx) * ct + (py - cy) * st
+        local_y = -(px - cx) * st + (py - cy) * ct
+
+        if event_def["geometry"] == "point_rod":
+            half_length = float(rigid.params.get("length", 2.0)) / 2.0
+            nearest_x = max(-half_length, min(half_length, local_x))
+            nearest_y = 0.0
+        else:
+            half_length = float(rigid.params.get("length", 2.0)) / 2.0
+            half_width = float(rigid.params.get("width", 0.5)) / 2.0
+            nearest_x = max(-half_length, min(half_length, local_x))
+            nearest_y = max(-half_width, min(half_width, local_y))
+
+        dx_local, dy_local = local_x - nearest_x, local_y - nearest_y
+        distance = np.hypot(dx_local, dy_local)
+        if distance < 1e-12:
+            return None
+        return ((dx_local * ct - dy_local * st) / distance,
+                (dx_local * st + dy_local * ct) / distance)
 
     def _build_soft_rope_events(self):
         events = []
@@ -725,6 +770,10 @@ class Engine:
                         nx = dx / dist
                         ny = dy / dist
 
+                        contact_normal = self._rigid_contact_normal(ed, new_state)
+                        if contact_normal is not None:
+                            nx, ny = contact_normal
+
                         vxi = new_state[nq_snap + idx_i]
                         vyi = new_state[nq_snap + idx_i + 1]
                         vxj = new_state[nq_snap + idx_j]
@@ -768,8 +817,11 @@ class Engine:
                                     if I_val > 0:
                                         new_state[omega_idx] += torque / I_val
 
-                            # Positional separation: push apart along normal to prevent re-trigger
-                            sep = max(0.0, (getattr(bi, "radius", 0.0) + getattr(bj, "radius", 0.0)) - dist) * 0.5 + 1e-10
+                            # Event geometry already stops at contact.  A tiny nudge
+                            # prevents solve_ivp from re-triggering at the restart.
+                            sep = 1e-10 if ed.get("geometry") else (
+                                max(0.0, (getattr(bi, "radius", 0.0) + getattr(bj, "radius", 0.0)) - dist) * 0.5 + 1e-10
+                            )
                             new_state[idx_i] += sep * nx
                             new_state[idx_i + 1] += sep * ny
                             new_state[idx_j] -= sep * nx
