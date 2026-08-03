@@ -25,3 +25,6 @@ output/
 *.log
 
 out.txt
+
+# Test artifacts
+crash_logs/

@@ -4,7 +4,7 @@ from scipy.integrate import solve_ivp
 from .symbols import SymbolManager
 from .energy import assemble_energy
 from .constraints import harvest_constraints
-from .projection import project_initial_state
+from .projection import project_initial_state, project_initial_velocity
 from .numerical import NumericalIntegrator
 from entities.mass_point import MassPoint
 from entities.rigid_body import RigidBody
@@ -33,32 +33,107 @@ def _node_init_pos(node):
     if xs is None or ys is None:
         return None, None
     try:
-        if xs.has(sp.Symbol("t")) or ys.has(sp.Symbol("t")):
+        if (hasattr(xs, "has") and xs.has(sp.Symbol("t"))) or \
+           (hasattr(ys, "has") and ys.has(sp.Symbol("t"))):
             return None, None
         return float(xs), float(ys)
     except Exception:
         return None, None
 
 
-def _segment_distance(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y):
-    """Shortest distance between two line segments AB and CD."""
-    import numpy as np
+def _point_segment_closest(px, py, sx, sy, ex, ey):
+    """Closest point (cx, cy) on segment SE to point P, plus distance."""
+    exx, eyy = ex - sx, ey - sy
+    t = ((px - sx) * exx + (py - sy) * eyy) / (exx*exx + eyy*eyy + 1e-30)
+    t = max(0.0, min(1.0, t))
+    cx = sx + t * exx
+    cy = sy + t * eyy
+    dx = px - cx
+    dy = py - cy
+    return (cx, cy), np.sqrt(dx * dx + dy * dy)
 
-    def dist_point_seg(px, py, sx, sy, ex, ey):
-        exx, eyy = ex - sx, ey - sy
-        t = ((px - sx) * exx + (py - sy) * eyy) / (exx*exx + eyy*eyy + 1e-30)
-        t = max(0.0, min(1.0, t))
-        cx = sx + t * exx
-        cy = sy + t * eyy
-        dx = px - cx
-        dy = py - cy
-        return np.sqrt(dx * dx + dy * dy)
 
-    d1 = dist_point_seg(b1x, b1y, a1x, a1y, a2x, a2y)
-    d2 = dist_point_seg(b2x, b2y, a1x, a1y, a2x, a2y)
-    d3 = dist_point_seg(a1x, a1y, b1x, b1y, b2x, b2y)
-    d4 = dist_point_seg(a2x, a2y, b1x, b1y, b2x, b2y)
-    return min(d1, d2, d3, d4)
+def _segments_intersect(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y):
+    """True if segments AB and CD intersect (proper crossing or touching)."""
+    def orient(px, py, qx, qy, rx, ry):
+        return (qx - px) * (ry - py) - (qy - py) * (rx - px)
+
+    def on_seg(px, py, sx, sy, ex, ey):
+        return (min(sx, ex) - 1e-12 <= px <= max(sx, ex) + 1e-12 and
+                min(sy, ey) - 1e-12 <= py <= max(sy, ey) + 1e-12)
+
+    d1 = orient(b1x, b1y, b2x, b2y, a1x, a1y)
+    d2 = orient(b1x, b1y, b2x, b2y, a2x, a2y)
+    d3 = orient(a1x, a1y, a2x, a2y, b1x, b1y)
+    d4 = orient(a1x, a1y, a2x, a2y, b2x, b2y)
+
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
+       ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+    if d1 == 0 and on_seg(a1x, a1y, b1x, b1y, b2x, b2y):
+        return True
+    if d2 == 0 and on_seg(a2x, a2y, b1x, b1y, b2x, b2y):
+        return True
+    if d3 == 0 and on_seg(b1x, b1y, a1x, a1y, a2x, a2y):
+        return True
+    if d4 == 0 and on_seg(b2x, b2y, a1x, a1y, a2x, a2y):
+        return True
+    return False
+
+
+def _segment_intersection(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y):
+    """Intersection point of two segments that are known to intersect."""
+    denom = (a1x - a2x) * (b1y - b2y) - (a1y - a2y) * (b1x - b2x)
+    if abs(denom) < 1e-30:
+        return ((a1x + a2x + b1x + b2x) / 4.0, (a1y + a2y + b1y + b2y) / 4.0)
+    t = ((a1x - b1x) * (b1y - b2y) - (a1y - b1y) * (b1x - b2x)) / denom
+    return (a1x + t * (a2x - a1x), a1y + t * (a2y - a1y))
+
+
+def _segment_closest_points(a1, a2, b1, b2):
+    """Closest point pair (pa on AB, pb on CD) and their distance.
+
+    Handles intersecting segments correctly: the distance is 0 and the
+    contact point is the intersection (the old endpoint-only computation
+    returned a positive distance for crossing segments, so rod-rod
+    collisions in an X shape were never detected).
+    """
+    a1x, a1y = a1
+    a2x, a2y = a2
+    b1x, b1y = b1
+    b2x, b2y = b2
+    if _segments_intersect(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y):
+        ip = _segment_intersection(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y)
+        return ip, ip, 0.0
+
+    best_d = None
+    best = None
+    for pa in (a1, a2):
+        pb, d = _point_segment_closest(pa[0], pa[1], b1x, b1y, b2x, b2y)
+        if best_d is None or d < best_d:
+            best_d, best = d, (pa, pb)
+    for pb in (b1, b2):
+        pa, d = _point_segment_closest(pb[0], pb[1], a1x, a1y, a2x, a2y)
+        if d < best_d:
+            best_d, best = d, (pa, pb)
+    return best[0], best[1], best_d
+
+
+def _edge_initial_attachment(node, pivot):
+    """Initial world position of an edge's attachment point on a node.
+
+    Pivot-aware for rigid bodies (init_state x/y/theta + local pivot),
+    mirroring the symbolic _world_pivot in constraints.py but numeric.
+    Returns (None, None) if the node's position is not resolvable.
+    """
+    if hasattr(node, "theta_sym") and node.theta_sym is not None:
+        x = float(node.init_state.get("x", 0.0))
+        y = float(node.init_state.get("y", 0.0))
+        th = float(node.init_state.get("theta", 0.0))
+        u, v = pivot if pivot is not None else (0.0, 0.0)
+        ct, st = np.cos(th), np.sin(th)
+        return (x + u * ct - v * st, y + u * st + v * ct)
+    return _node_init_pos(node)
 
 
 class Engine:
@@ -144,8 +219,6 @@ class Engine:
                 p.radius = float(node.get("params", {}).get("radius", 0.0))
                 p._fx_expr = node.get("params", {}).get("external_force_x_expr")
                 p._fy_expr = node.get("params", {}).get("external_force_y_expr")
-                if p._fx_expr or p._fy_expr:
-                    self._has_external_forces = True
                 self.sm.add_point(p)
                 self.points.append(p)
             elif ntype == "RigidBody":
@@ -214,6 +287,30 @@ class Engine:
             if e.from_node is None:
                 raise ValueError(f"Edge {e.id}: from_node '{e.from_id}' not found")
 
+            # Backfill rod/rope length and spring rest length from the actual
+            # initial geometry when the caller did not specify them.  This
+            # keeps the GUI (which creates edges before knowing the on-canvas
+            # distance) and JSON API callers from getting a default length
+            # that makes the projection jump the nodes on the first run.
+            if e.type in ("IdealRod", "SoftRope") and "length" not in e.params:
+                a, b = e.from_node, e.to_node
+                if a is not None and b is not None:
+                    ax, ay = _edge_initial_attachment(
+                        a, getattr(e, "from_pivot", None))
+                    bx, by = _edge_initial_attachment(
+                        b, getattr(e, "to_pivot", None))
+                    if ax is not None and bx is not None:
+                        e.length = np.hypot(ax - bx, ay - by)
+            elif e.type == "IdealSpring" and "l0" not in e.params:
+                a, b = e.from_node, e.to_node
+                if a is not None and b is not None:
+                    ax, ay = _edge_initial_attachment(
+                        a, getattr(e, "from_pivot", None))
+                    bx, by = _edge_initial_attachment(
+                        b, getattr(e, "to_pivot", None))
+                    if ax is not None and bx is not None:
+                        e.l0 = np.hypot(ax - bx, ay - by)
+
             # SmoothRail: when 'from' is a static anchor, the rail constrains
             # the dynamic endpoint of this edge, not an arbitrary first point.
             if e.type == "SmoothRail" and not _is_dynamic(e.from_node):
@@ -273,10 +370,21 @@ class Engine:
                     f_func = sp.lambdify(proj_args, f_sym, modules="numpy")
                     J_func = sp.lambdify(proj_args, J_sym, modules="numpy")
                     q0 = project_initial_state(q0, qd0, f_func, J_func, extra_args=(0.0,), context=ctx)
+                    # Numeric central difference for ∂f/∂t at (q0, t=0)
+                    # (symbolic Derivative cannot be lambdified by NumPyPrinter).
+                    h = 1e-6
+                    def f_t_func(*args):
+                        q_vals = list(args[:-1])
+                        t_val = args[-1]
+                        f_p = np.asarray(f_func(*(q_vals + [t_val + h]))).ravel()
+                        f_m = np.asarray(f_func(*(q_vals + [t_val - h]))).ravel()
+                        return (f_p - f_m) / (2.0 * h)
+                    qd0 = project_initial_velocity(q0, qd0, J_func, f_t_func, extra_args=(0.0,))
                 else:
                     f_func = sp.lambdify(tuple(q), f_sym, modules="numpy")
                     J_func = sp.lambdify(tuple(q), J_sym, modules="numpy")
                     q0 = project_initial_state(q0, qd0, f_func, J_func, context=ctx)
+                    qd0 = project_initial_velocity(q0, qd0, J_func)
 
         self.q0_projected = q0
         self.qd0 = qd0
@@ -355,6 +463,7 @@ class Engine:
         body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
 
         seg_start = 0.0
+        last_t = None
         while seg_start < duration:
             seg_end = min(seg_start + seg_duration, duration)
             mask = (t_full >= seg_start) & (t_full <= seg_end)
@@ -370,14 +479,25 @@ class Engine:
                 return
 
             state = result.y[:, -1]
+            # Drop the leading point if it duplicates the previous segment's
+            # end (segment boundaries are included in both t_seg windows).
+            if last_t is not None:
+                keep = np.where(result.t > last_t + 1e-12)[0]
+                if len(keep) == 0:
+                    continue
+                keep0 = keep[0]
+            else:
+                keep0 = 0
             chunk = {
-                "t": result.t.tolist(),
-                "q": result.y[:nq].T.tolist(),
+                "t": result.t[keep0:].tolist(),
+                "q": result.y[:nq, keep0:].T.tolist(),
+                "qd": result.y[nq:2*nq, keep0:].T.tolist() if result.y.shape[0] >= 2*nq else None,
                 "node_order": node_order,
                 "complete": seg_end >= duration,
             }
             if seg_start == 0.0:
                 chunk["body_dofs"] = body_dofs
+            last_t = float(result.t[-1])
             on_chunk(chunk)
             seg_start = seg_end
 
@@ -407,13 +527,57 @@ class Engine:
         event.direction = 0
         return event
 
-    def _rigid_body_segment_endpoints(self, body):
-        """Return the world-coordinate endpoints (x1,y1,x2,y2) of a RigidBody's
-        collision segment (for rod shape) or bounding box (for rect shape)."""
-        L = float(body.params.get("length", 2.0)) / 2.0
-        W = float(body.params.get("width", 0.5)) / 2.0
-        # We store theta_sym, idx etc for state access
-        return L, W
+    def _body_shape_segments(self, body, state):
+        """World-frame segments of a RigidBody: rod -> 1 segment, rect -> 4."""
+        if not (hasattr(body, "theta_sym") and body.theta_sym is not None):
+            return []
+        idx = self._body_dof_index(body)
+        cx, cy, th = state[idx], state[idx + 1], state[idx + 2]
+        L = float(body.params.get("length", 2.0))
+        W = float(body.params.get("width", 0.5))
+        half_l, half_w = L / 2.0, W / 2.0
+        ct, st = np.cos(th), np.sin(th)
+        if body.params.get("shape", "rect") == "rod":
+            return [((cx - half_l * ct, cy - half_l * st),
+                     (cx + half_l * ct, cy + half_l * st))]
+        corners = [(-half_l, -half_w), (half_l, -half_w),
+                   (half_l, half_w), (-half_l, half_w)]
+        pts = [(cx + u * ct - v * st, cy + u * st + v * ct) for u, v in corners]
+        return [(pts[i], pts[(i + 1) % 4]) for i in range(4)]
+
+    def _shape_vs_shape_distance(self, bi, bj, state):
+        """Min distance between two rigid bodies' shapes plus closest points."""
+        segs_a = self._body_shape_segments(bi, state)
+        segs_b = self._body_shape_segments(bj, state)
+        best = None
+        for a1, a2 in segs_a:
+            for b1, b2 in segs_b:
+                pa, pb, d = _segment_closest_points(a1, a2, b1, b2)
+                if best is None or d < best[0]:
+                    best = (d, pa, pb)
+        return best if best is not None else (np.inf, None, None)
+
+    def _shape_vs_anchor_distance(self, body, ax, ay, state):
+        """Distance from a body's shape to an anchor point, plus the closest
+        point on the shape."""
+        segs = self._body_shape_segments(body, state)
+        best = None
+        for s1, s2 in segs:
+            p, d = _point_segment_closest(ax, ay, s1[0], s1[1], s2[0], s2[1])
+            if best is None or d < best[0]:
+                best = (d, p)
+        return best if best is not None else (np.inf, None)
+
+    def _event_shape_vs_shape(self, idx_a, idx_b, body_a, body_b, offset):
+        """Collision event between two rigid bodies (rod/rect) via their
+        segments.  Covers rod-rod, rod-rect and rect-rect; `offset` is the
+        capsule half-width of the rod(s)."""
+        def event(t, state):
+            d, _, _ = self._shape_vs_shape_distance(body_a, body_b, state)
+            return d - offset
+        event.terminal = True
+        event.direction = 0
+        return event
 
     def _event_point_vs_rod(self, mp_idx, rb_idx, L, contact_radius):
         """Point-to-line-segment collision event.
@@ -473,33 +637,6 @@ class Engine:
         event.direction = 0
         return event
 
-    def _event_rod_vs_rod(self, idx_a, idx_b, L_a, L_b, contact_radius):
-        """Segment-to-segment shortest-distance collision event."""
-        half_a = L_a / 2.0
-        half_b = L_b / 2.0
-        def event(t, state):
-            cax, cay = state[idx_a], state[idx_a + 1]
-            ta = state[idx_a + 2]
-            cbx, cby = state[idx_b], state[idx_b + 1]
-            tb = state[idx_b + 2]
-            ct_a, st_a = np.cos(ta), np.sin(ta)
-            ct_b, st_b = np.cos(tb), np.sin(tb)
-            a1x = cax - half_a * ct_a
-            a1y = cay - half_a * st_a
-            a2x = cax + half_a * ct_a
-            a2y = cay + half_a * st_a
-            b1x = cbx - half_b * ct_b
-            b1y = cby - half_b * st_b
-            b2x = cbx + half_b * ct_b
-            b2y = cby + half_b * st_b
-            # Shortest distance between two segments
-            # Using geometric approach: check endpoints vs other segment, plus segment intersection
-            d = _segment_distance(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y)
-            return d - contact_radius
-        event.terminal = True
-        event.direction = 0
-        return event
-
     def _find_body(self, body_id):
         for p in self.points:
             if p.id == body_id:
@@ -521,12 +658,20 @@ class Engine:
         """Build event dicts for all pairs of bodies with radius > 0.
 
         Includes dynamic bodies (MassPoint, RigidBody) and static anchors
-        that have radius > 0.
+        that have radius > 0.  Every (point/rod/rect) x (point/rod/rect)
+        combination gets a precise geometry event; a rect-vs-rect or
+        rod-vs-rect pair no longer falls back to (or silently loses) the
+        circle approximation.
         """
         restitution = float(self.topology.get("system_env", {}).get("restitution", 1.0))
         all_bodies = self.points + self.rigid_bodies
         bodies_with_radius = [b for b in all_bodies
                               if getattr(b, "radius", 0.0) > 0 and b.id is not None]
+        # Precise point/rod/rect geometry events cover EVERY dynamic pair
+        # (matching the pre-existing behavior: rigid bodies are colliders
+        # even when they carry no radius param).  Only circle-circle
+        # (point-point) and anchor events require radius > 0.
+        bodies_all = [b for b in all_bodies if b.id is not None]
 
         # Collect anchors with radius from topology
         anchor_radius = {}
@@ -536,31 +681,86 @@ class Engine:
                 if r > 0:
                     anchor_radius[n["id"]] = r
 
+        def _is_point(body):
+            return not (hasattr(body, "theta_sym") and body.theta_sym is not None)
+
         events = []
         resting = self._resting_pairs
-        for i in range(len(bodies_with_radius)):
-            for j in range(i + 1, len(bodies_with_radius)):
-                bi = bodies_with_radius[i]
-                bj = bodies_with_radius[j]
+        for i in range(len(bodies_all)):
+            bi = bodies_all[i]
+            is_point_i = _is_point(bi)
+
+            for j in range(i + 1, len(bodies_all)):
+                bj = bodies_all[j]
                 if frozenset([bi.id, bj.id]) in resting:
                     continue
-                event_func = self._event_func_from_state(bi.id, bj.id)
-                if event_func is None:
-                    continue
+                is_point_j = _is_point(bj)
+
+                if is_point_i and is_point_j:
+                    if not (getattr(bi, "radius", 0.0) > 0 and
+                            getattr(bj, "radius", 0.0) > 0):
+                        continue
+                    # Normalize to (point, rigid) when exactly one is a point,
+                    # so the precise point-vs-shape events and contact math can
+                    # assume body_i is the point and body_j the rigid body.
+                    bi_n, bj_n = bi, bj
+                elif is_point_j and not is_point_i:
+                    bi_n, bj_n = bj, bi
+                else:
+                    bi_n, bj_n = bi, bj
+
+                idx_i = self._body_dof_index(bi_n)
+                idx_j = self._body_dof_index(bj_n)
+
+                if is_point_i and is_point_j:
+                    event_func = self._event_func_from_state(bi_n.id, bj_n.id)
+                    geometry = None
+                elif is_point_i or is_point_j:
+                    shape_j = bj_n.params.get("shape", "rect")
+                    L_b = float(bj_n.params.get("length", 2.0))
+                    W_b = float(bj_n.params.get("width", 0.5))
+                    if shape_j == "rod":
+                        contact_radius = bi_n.radius + W_b / 2.0
+                        event_func = self._event_point_vs_rod(idx_i, idx_j, L_b, contact_radius)
+                        geometry = "point_rod"
+                    else:
+                        event_func = self._event_point_vs_rect(idx_i, idx_j, L_b, W_b, bi_n.radius)
+                        geometry = "point_rect"
+                else:
+                    # Rigid-vs-rigid: rod/rect combinations via segments.
+                    shape_i = bi_n.params.get("shape", "rect")
+                    shape_j = bj_n.params.get("shape", "rect")
+                    W_a = float(bi_n.params.get("width", 0.5))
+                    W_b = float(bj_n.params.get("width", 0.5))
+                    if shape_i == "rod" and shape_j == "rod":
+                        offset = (W_a + W_b) / 2.0
+                    elif shape_i == "rod":
+                        offset = W_a / 2.0
+                    elif shape_j == "rod":
+                        offset = W_b / 2.0
+                    else:
+                        # Rect-vs-rect: the raw distance is >= 0 and never
+                        # crosses zero (it just touches), which no terminal
+                        # event would detect.  A tiny epsilon makes the event
+                        # fire epsilon before contact.
+                        offset = 1e-9
+                    event_func = self._event_shape_vs_shape(idx_i, idx_j, bi_n, bj_n, offset)
+                    geometry = "shape_shape"
+
                 events.append({
-                    "name": f"collision_{bi.id}_{bj.id}",
+                    "name": f"collision_{bi_n.id}_{bj_n.id}",
                     "func": event_func,
                     "terminal": True,
-                    "direction": -1,
+                    "direction": 0,
                     "type": "collision",
-                    "body_i": bi,
-                    "body_j": bj,
+                    "body_i": bi_n,
+                    "body_j": bj_n,
                     "restitution": restitution,
+                    "geometry": geometry,
                 })
 
             # Dynamic body vs anchor
             for anchor_id, anchor_r in anchor_radius.items():
-                bi = bodies_with_radius[i]
                 if frozenset([bi.id, anchor_id]) in resting:
                     continue
                 anchor_node = None
@@ -573,24 +773,25 @@ class Engine:
                 ax = float(anchor_node.get("init_pos", [0, 0])[0])
                 ay = float(anchor_node.get("init_pos", [0, 0])[1])
                 idx_i = self._body_dof_index(bi)
-                bi_r = getattr(bi, "radius", 0.0)
 
-                def make_anchor_event(idx_i, ax, ay, bi_r, anchor_r):
-                    r_sum = bi_r + anchor_r
-                    r_sum_sq = r_sum * r_sum
-                    def event(t, state):
-                        dx = state[idx_i] - ax
-                        dy = state[idx_i + 1] - ay
-                        return dx * dx + dy * dy - r_sum_sq
-                    event.terminal = True
-                    event.direction = 0
-                    return event
+                if is_point_i:
+                    event_func = self._make_anchor_point_event(idx_i, ax, ay, bi.radius, anchor_r)
+                    geometry = None
+                else:
+                    # Rod/rect bodies collide with the anchor by their actual
+                    # shape, not just the COM circle, so rod ends and rect
+                    # corners cannot pass through walls/floor circles.
+                    shape = bi.params.get("shape", "rect")
+                    half_w = float(bi.params.get("width", 0.5)) / 2.0
+                    offset = anchor_r + (half_w if shape == "rod" else 0.0)
+                    event_func = self._make_anchor_shape_event(idx_i, ax, ay, bi, offset)
+                    geometry = "anchor_rod" if shape == "rod" else "anchor_rect"
 
                 events.append({
                     "name": f"collision_{bi.id}_{anchor_id}",
-                    "func": make_anchor_event(idx_i, ax, ay, bi_r, anchor_r),
+                    "func": event_func,
                     "terminal": True,
-                    "direction": -1,
+                    "direction": 0,
                     "type": "collision",
                     "body_i": bi,
                     "body_j": None,
@@ -599,98 +800,123 @@ class Engine:
                     "_anchor_y": ay,
                     "_anchor_r": anchor_r,
                     "restitution": restitution,
-                })
-
-        # RigidBody collisions: point-vs-rod and rod-vs-rod
-        rigid_bodies_list = [b for b in self.rigid_bodies if b.id is not None]
-        for bi in self.points + rigid_bodies_list:
-            for bj in rigid_bodies_list:
-                if bi.id == bj.id:
-                    continue
-                if frozenset([bi.id, bj.id]) in resting:
-                    continue
-                # Replace any coarse circle-vs-circle event for this pair
-                # with the precise geometry event.
-                already_idx = None
-                for k, ed in enumerate(events):
-                    if (ed.get("body_i") is bi and ed.get("body_j") is bj or
-                            ed.get("body_i") is bj and ed.get("body_j") is bi):
-                        already_idx = k
-                        break
-                if already_idx is not None:
-                    events.pop(already_idx)
-                shape_b = bj.params.get("shape", "rect")
-                idx_i = self._body_dof_index(bi)
-                idx_j = self._body_dof_index(bj)
-                L_b = float(bj.params.get("length", 2.0))
-                W_b = float(bj.params.get("width", 0.5))
-                is_point = not (hasattr(bi, "theta_sym") and bi.theta_sym is not None)
-                if is_point:
-                    if shape_b == "rod":
-                        contact_radius = getattr(bi, "radius", 0.0) + W_b / 2.0
-                        func = self._event_point_vs_rod(idx_i, idx_j, L_b, contact_radius)
-                        geometry = "point_rod"
-                    else:
-                        contact_radius = getattr(bi, "radius", 0.0)
-                        func = self._event_point_vs_rect(idx_i, idx_j, L_b, W_b, contact_radius)
-                        geometry = "point_rect"
-                elif shape_b == "rod":
-                    L_a = float(bi.params.get("length", 2.0))
-                    W_a = float(bi.params.get("width", 0.5))
-                    contact_radius = (W_a + W_b) / 2.0
-                    func = self._event_rod_vs_rod(idx_i, idx_j, L_a, L_b, contact_radius)
-                    geometry = "rod_rod"
-                else:
-                    # rect-vs-rect can be added later; skip for now
-                    continue
-                events.append({
-                    "name": f"collision_{bi.id}_{bj.id}",
-                    "func": func,
-                    "terminal": True,
-                    "direction": 0,
-                    "type": "collision",
-                    "body_i": bi,
-                    "body_j": bj,
-                    "restitution": restitution,
                     "geometry": geometry,
                 })
+
         return events
 
-    def _rigid_contact_normal(self, event_def, state):
-        """Return the contact normal pointing from body_j to body_i.
+    def _make_anchor_point_event(self, idx_i, ax, ay, bi_r, anchor_r):
+        """Circle-vs-circle event for a point body against a static anchor."""
+        r_sum = bi_r + anchor_r
+        r_sum_sq = r_sum * r_sum
 
-        The center-to-center vector is wrong for an off-center hit on a rod or
-        rectangle, so derive the normal from the closest point on the shape.
+        def event(t, state):
+            dx = state[idx_i] - ax
+            dy = state[idx_i + 1] - ay
+            return dx * dx + dy * dy - r_sum_sq
+        event.terminal = True
+        event.direction = 0
+        return event
+
+    def _make_anchor_shape_event(self, idx_i, ax, ay, body, offset):
+        """Shape-vs-circle event: fires when the body's rod/rect surface
+        reaches the anchor circle."""
+        def event(t, state):
+            d, _ = self._shape_vs_anchor_distance(body, ax, ay, state)
+            return d - offset
+        event.terminal = True
+        event.direction = 0
+        return event
+
+    def _contact_data(self, event_def, state):
+        """Contact info for an event: (normal, pa, pb, dist).
+
+        normal points from body_j to body_i; pa is the contact point on
+        body_i, pb the contact point on body_j.  For point-vs-shape the
+        normal comes from the closest point on the shape (center-to-center
+        would be wrong for off-center hits); for shape-vs-shape it comes
+        from the closest-point pair of the segment features.
         """
-        if event_def.get("geometry") not in {"point_rod", "point_rect"}:
+        bi = event_def["body_i"]
+        bj = event_def["body_j"]
+        geometry = event_def.get("geometry")
+        idx_i = self._body_dof_index(bi)
+        xi, yi = state[idx_i], state[idx_i + 1]
+
+        if geometry in ("point_rod", "point_rect"):
+            rigid = bj
+            ridx = self._body_dof_index(rigid)
+            cx, cy, theta = state[ridx], state[ridx + 1], state[ridx + 2]
+            ct, st = np.cos(theta), np.sin(theta)
+            local_x = (xi - cx) * ct + (yi - cy) * st
+            local_y = -(xi - cx) * st + (yi - cy) * ct
+            if geometry == "point_rod":
+                half_length = float(rigid.params.get("length", 2.0)) / 2.0
+                nearest_x = max(-half_length, min(half_length, local_x))
+                nearest_y = 0.0
+            else:
+                half_length = float(rigid.params.get("length", 2.0)) / 2.0
+                half_width = float(rigid.params.get("width", 0.5)) / 2.0
+                nearest_x = max(-half_length, min(half_length, local_x))
+                nearest_y = max(-half_width, min(half_width, local_y))
+            pb = (cx + nearest_x * ct - nearest_y * st,
+                  cy + nearest_x * st + nearest_y * ct)
+            pa = (xi, yi)
+            dx = pa[0] - pb[0]
+            dy = pa[1] - pb[1]
+            dist = np.hypot(dx, dy)
+            if dist < 1e-12:
+                return None
+            return (dx / dist, dy / dist), pa, pb, dist
+
+        if geometry == "shape_shape":
+            d, pa, pb = self._shape_vs_shape_distance(bi, bj, state)
+            if d >= np.inf:
+                return None
+            dx = pa[0] - pb[0]
+            dy = pa[1] - pb[1]
+            dist = np.hypot(dx, dy)
+            if dist < 1e-12:
+                # Degenerate (deep overlap): fall back to center-to-center.
+                idx_j = self._body_dof_index(bj)
+                xj, yj = state[idx_j], state[idx_j + 1]
+                dx, dy = xi - xj, yi - yj
+                dist = np.hypot(dx, dy)
+                if dist < 1e-12:
+                    return None
+                pa, pb = (xi, yi), (xj, yj)
+            return (dx / dist, dy / dist), pa, pb, dist
+
+        if bj is None:
+            # Anchor collision: normal from the anchor center toward the
+            # body's contact feature.
+            ax = event_def.get("_anchor_x", xi)
+            ay = event_def.get("_anchor_y", yi)
+            if geometry in ("anchor_rod", "anchor_rect"):
+                _, pa = self._shape_vs_anchor_distance(bi, ax, ay, state)
+            else:
+                pa = (xi, yi)
+            dx = pa[0] - ax
+            dy = pa[1] - ay
+            dist = np.hypot(dx, dy)
+            if dist < 1e-12:
+                # Center exactly on the anchor: fall back to COM direction.
+                dx, dy = xi - ax, yi - ay
+                dist = np.hypot(dx, dy)
+                if dist < 1e-12:
+                    return None
+                pa = (xi, yi)
+            return (dx / dist, dy / dist), pa, (ax, ay), dist
+
+        # Point-point (circle event): normal from centers, contact at centers.
+        idx_j = self._body_dof_index(bj)
+        xj, yj = state[idx_j], state[idx_j + 1]
+        dx = xi - xj
+        dy = yi - yj
+        dist = np.hypot(dx, dy)
+        if dist < 1e-12:
             return None
-
-        point = event_def["body_i"]
-        rigid = event_def["body_j"]
-        point_idx = self._body_dof_index(point)
-        rigid_idx = self._body_dof_index(rigid)
-        px, py = state[point_idx], state[point_idx + 1]
-        cx, cy, theta = state[rigid_idx], state[rigid_idx + 1], state[rigid_idx + 2]
-        ct, st = np.cos(theta), np.sin(theta)
-        local_x = (px - cx) * ct + (py - cy) * st
-        local_y = -(px - cx) * st + (py - cy) * ct
-
-        if event_def["geometry"] == "point_rod":
-            half_length = float(rigid.params.get("length", 2.0)) / 2.0
-            nearest_x = max(-half_length, min(half_length, local_x))
-            nearest_y = 0.0
-        else:
-            half_length = float(rigid.params.get("length", 2.0)) / 2.0
-            half_width = float(rigid.params.get("width", 0.5)) / 2.0
-            nearest_x = max(-half_length, min(half_length, local_x))
-            nearest_y = max(-half_width, min(half_width, local_y))
-
-        dx_local, dy_local = local_x - nearest_x, local_y - nearest_y
-        distance = np.hypot(dx_local, dy_local)
-        if distance < 1e-12:
-            return None
-        return ((dx_local * ct - dy_local * st) / distance,
-                (dx_local * st + dy_local * ct) / distance)
+        return (dx / dist, dy / dist), (xi, yi), (xj, yj), dist
 
     def _anchor_pos_func(self, body):
         """Return a callable t -> (x, y) for a static or moving anchor.
@@ -709,6 +935,29 @@ class Engine:
                     float(yf(t)) if yf else float(ys))
         return pos
 
+    def _node_pivot_from_state(self, node, pivot, state, nq):
+        """(px, py, vx, vy) of a node's rope attachment point from solver state.
+
+        Rigid bodies use the local pivot offset (u, v) and include the
+        rotational contribution w x r to the endpoint velocity; mass points
+        use the COM directly.
+        """
+        idx = self._body_dof_index(node)
+        x, y = state[idx], state[idx + 1]
+        vx, vy = state[nq + idx], state[nq + idx + 1]
+        if hasattr(node, "theta_sym") and node.theta_sym is not None:
+            th = state[idx + 2]
+            w = state[nq + idx + 2]
+            u, v = pivot if pivot is not None else (0.0, 0.0)
+            ct, st = np.cos(th), np.sin(th)
+            px = x + u * ct - v * st
+            py = y + u * st + v * ct
+            rx, ry = px - x, py - y
+            vx += -w * ry
+            vy += w * rx
+            return px, py, vx, vy
+        return x, y, vx, vy
+
     def _build_soft_rope_events(self):
         events = []
         for e in self.edges:
@@ -723,16 +972,18 @@ class Engine:
             idx_b = self._body_dof_index(b) if _is_dynamic(b) else None
             pos_a = None if idx_a is not None else self._anchor_pos_func(a)
             pos_b = None if idx_b is not None else self._anchor_pos_func(b)
+            pivot_a = getattr(e, "from_pivot", None)
+            pivot_b = getattr(e, "to_pivot", None)
             length = float(e.length)
 
-            def make_event(edge, direction, ia, ib, pa, pb, rope_len):
+            def make_event(edge, direction, ia, ib, pa, pb, pva, pvb, rope_len):
                 def event(t, state):
                     if ia is not None:
-                        ax, ay = float(state[ia]), float(state[ia + 1])
+                        ax, ay = self._node_pivot_from_state(edge.from_node, pva, state, 0)[:2]
                     else:
                         ax, ay = pa(t)
                     if ib is not None:
-                        bx, by = float(state[ib]), float(state[ib + 1])
+                        bx, by = self._node_pivot_from_state(edge.to_node, pvb, state, 0)[:2]
                     else:
                         bx, by = pb(t)
                     return np.sqrt((ax - bx) ** 2 + (ay - by) ** 2) - rope_len
@@ -746,9 +997,10 @@ class Engine:
             if not getattr(e, "_tight", False):
                 events.append({
                     "name": f"tighten_{e.id}",
-                    "func": make_event(e, +1, idx_a, idx_b, pos_a, pos_b, length),
+                    "func": make_event(e, +1, idx_a, idx_b, pos_a, pos_b,
+                                       pivot_a, pivot_b, length),
                     "terminal": True,
-                    "direction": -1,
+                    "direction": +1,
                     "type": "tighten",
                     "edge": e,
                 })
@@ -767,13 +1019,17 @@ class Engine:
 
         self._resting_pairs = set()
         self._resting_rods = []
+        # Ropes that are taut from the start (or rods added before this
+        # point) must have their multipliers monitored immediately, or a
+        # pushed rope could never slacken.
+        self._refresh_resting_rods()
 
         # Check if any events are needed
         collision_events = self._build_collision_events()
         soft_rope_events = self._build_soft_rope_events()
         all_event_defs = collision_events + soft_rope_events
 
-        if not all_event_defs:
+        if not all_event_defs and not self._resting_rods:
             self.run_stream(on_chunk, _skip_init=True)
             return
 
@@ -792,6 +1048,8 @@ class Engine:
         body_dofs = [2] * len(self.points) + [3] * len(self.rigid_bodies)
 
         ext_forces = self._build_external_forces()
+
+        last_t = None
 
         while t_current < duration and mutation_count < max_mutations:
             integrator = NumericalIntegrator(L, q, qd, self.holonomic, self.sm, external_forces=ext_forces)
@@ -840,14 +1098,21 @@ class Engine:
                              and any(len(te) > 0 for te in result.t_events))
 
             if any_triggered:
-                # Emit trajectory BEFORE the event (t=0 through t_event)
+                # Emit trajectory BEFORE the event (t=0 through t_event),
+                # dropping any leading point that duplicates the previous
+                # chunk's tail (restart from the event time).
+                keep0 = 0
+                if last_t is not None:
+                    keep = np.where(result.t > last_t + 1e-12)[0]
+                    keep0 = keep[0] if len(keep) else len(result.t)
                 on_chunk({
-                    "t": result.t.tolist(),
-                    "q": result.y[:nq].T.tolist(),
-                    "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
+                    "t": result.t[keep0:].tolist(),
+                    "q": result.y[:nq, keep0:].T.tolist(),
+                    "qd": result.y[nq:2*nq, keep0:].T.tolist() if result.y.shape[0] >= 2*nq else None,
                     "node_order": node_order,
                     "body_dofs": body_dofs,
                 })
+                last_t = float(result.t[-1])
 
                 t_event = None
                 first_idx = -1
@@ -876,147 +1141,177 @@ class Engine:
 
                     if bj is None:
                         # Anchor collision: infinite mass.
-                        vxi = new_state[nq_snap + idx_i]
-                        vyi = new_state[nq_snap + idx_i + 1]
-
-                        dx = xi - (ed.get("_anchor_x", xi + 1))
-                        dy = yi - (ed.get("_anchor_y", yi + 1))
-                        dist = np.sqrt(dx * dx + dy * dy)
-                        if dist < 1e-15:
-                            dist = 1e-15
-                        nx = dx / dist
-                        ny = dy / dist
-
-                        # Bounce regardless of approach direction: a body
-                        # escaping a large anchor (e.g. a floor circle) must
-                        # be reflected too, otherwise it falls through.
-                        e_rest = float(ed.get("restitution", 1.0))
-                        vn = vxi * nx + vyi * ny
-                        dvn = -(1.0 + e_rest) * vn
-                        new_state[nq_snap + idx_i] += dvn * nx
-                        new_state[nq_snap + idx_i + 1] += dvn * ny
-
-                        # Angular impulse for rigid bodies hitting an anchor
-                        if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
-                            omega_idx = nq_snap + idx_i + 2
-                            bi_r = float(getattr(bi, "radius", 0.0))
-                            cx = xi + nx * bi_r
-                            cy = yi + ny * bi_r
-                            rx = cx - xi
-                            ry = cy - yi
-                            Jx = bi.m * dvn * nx
-                            Jy = bi.m * dvn * ny
-                            torque = rx * Jy - ry * Jx
-                            if bi.I > 0:
-                                new_state[omega_idx] += torque / bi.I
-
-                        vn_post = vn + dvn
-                        if abs(vn_post) < self.REST_EPS:
-                            # Resting contact with the anchor: convert to a
-                            # bilateral distance constraint so gravity does
-                            # not re-trigger events forever.
-                            anchor_id = ed.get("_anchor_id")
-                            r_sum = getattr(bi, "radius", 0.0) + ed.get("_anchor_r", 0.0)
-                            rod = IdealRod(f"rest_{bi.id}_{anchor_id}", bi.id, anchor_id,
-                                           {"length": r_sum})
-                            rod.from_node = bi
-                            rod.to_node = self.node_map.get(anchor_id)
-                            rod._contact_rod = True
-                            self.edges.append(rod)
-                            self._resting_pairs.add(frozenset([bi.id, anchor_id]))
-                            topology_change = True
+                        ax = ed.get("_anchor_x", xi)
+                        ay = ed.get("_anchor_y", yi)
+                        cd = self._contact_data(ed, new_state)
+                        if cd is None:
+                            state = new_state
                         else:
-                            # Positional separation: nudge to the side the
-                            # body is heading after the bounce (outward for
-                            # an approach, inward for an escape), so the
-                            # event does not immediately re-cross.
-                            sep = max(0.0, (bi.radius + ed.get("_anchor_r", 0.0)) - dist) * 0.5 + 1e-10
-                            sep_dir = -1.0 if vn > 0 else 1.0
-                            new_state[idx_i] += sep_dir * sep * nx
-                            new_state[idx_i + 1] += sep_dir * sep * ny
+                            (nx, ny), pa, _pb, _cd = cd
+                            # Contact point on the body; r is its lever arm
+                            # about the body COM.  For a rod/rect the contact
+                            # is at the shape surface, not the COM circle.
+                            rax, ray = pa[0] - xi, pa[1] - yi
+
+                            vxi = new_state[nq_snap + idx_i]
+                            vyi = new_state[nq_snap + idx_i + 1]
+                            vcx, vcy = vxi, vyi
+                            if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                wi = new_state[nq_snap + idx_i + 2]
+                                vcx += -wi * ray
+                                vcy += wi * rax
+
+                            # Bounce regardless of approach direction: a body
+                            # escaping a large anchor (e.g. a floor circle) must
+                            # be reflected too, otherwise it falls through.
+                            e_rest = float(ed.get("restitution", 1.0))
+                            vn = vcx * nx + vcy * ny
+                            dvn = -(1.0 + e_rest) * vn
+
+                            meff_inv = 1.0 / bi.m
+                            if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                rn = rax * ny - ray * nx
+                                if bi.I > 0:
+                                    meff_inv += rn * rn / bi.I
+                            impulse = dvn / meff_inv
+
+                            new_state[nq_snap + idx_i] += impulse / bi.m * nx
+                            new_state[nq_snap + idx_i + 1] += impulse / bi.m * ny
+                            if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                torque = rax * (impulse * ny) - ray * (impulse * nx)
+                                if bi.I > 0:
+                                    new_state[nq_snap + idx_i + 2] += torque / bi.I
+
+                            vn_post = vn + dvn
+                            if abs(vn_post) < self.REST_EPS:
+                                # Resting contact with the anchor: convert to
+                                # a bilateral distance constraint (COM to
+                                # anchor center) so gravity does not re-trigger
+                                # events forever.
+                                anchor_id = ed.get("_anchor_id")
+                                d_com = np.hypot(xi - ax, yi - ay)
+                                rod = IdealRod(f"rest_{bi.id}_{anchor_id}", bi.id, anchor_id,
+                                               {"length": d_com})
+                                rod.from_node = bi
+                                rod.to_node = self.node_map.get(anchor_id)
+                                rod._contact_rod = True
+                                self.edges.append(rod)
+                                self._resting_pairs.add(frozenset([bi.id, anchor_id]))
+                                topology_change = True
+                            else:
+                                # Positional separation: nudge to the side the
+                                # body is heading after the bounce (outward for
+                                # an approach, inward for an escape), so the
+                                # event does not immediately re-cross.
+                                if ed.get("geometry"):
+                                    sep = 1e-10
+                                else:
+                                    dist = np.hypot(xi - ax, yi - ay)
+                                    sep = max(0.0, (bi.radius + ed.get("_anchor_r", 0.0)) - dist) * 0.5 + 1e-10
+                                sep_dir = -1.0 if vn > 0 else 1.0
+                                new_state[idx_i] += sep_dir * sep * nx
+                                new_state[idx_i + 1] += sep_dir * sep * ny
                     else:
                         idx_j = self._body_dof_index(bj)
                         xj = new_state[idx_j]
                         yj = new_state[idx_j + 1]
-                        dx = xi - xj
-                        dy = yi - yj
-                        dist = np.sqrt(dx * dx + dy * dy)
-                        if dist < 1e-15:
-                            dist = 1e-15
-                        nx = dx / dist
-                        ny = dy / dist
 
-                        contact_normal = self._rigid_contact_normal(ed, new_state)
-                        if contact_normal is not None:
-                            nx, ny = contact_normal
+                        cd = self._contact_data(ed, new_state)
+                        if cd is None:
+                            state = new_state
+                        else:
+                            (nx, ny), pa, pb, _cd = cd
+                            rax, ray = pa[0] - xi, pa[1] - yi
+                            rbx, rby = pb[0] - xj, pb[1] - yj
 
-                        vxi = new_state[nq_snap + idx_i]
-                        vyi = new_state[nq_snap + idx_i + 1]
-                        vxj = new_state[nq_snap + idx_j]
-                        vyj = new_state[nq_snap + idx_j + 1]
-                        vrel = nx * (vxi - vxj) + ny * (vyi - vyj)
-                        if vrel < 0:
-                            mi = bi.m
-                            mj = bj.m
-                            e_restitution = float(ed.get("restitution", 1.0))
-                            impulse = -(1.0 + e_restitution) * vrel / (1.0 / mi + 1.0 / mj)
+                            vxi = new_state[nq_snap + idx_i]
+                            vyi = new_state[nq_snap + idx_i + 1]
+                            vxj = new_state[nq_snap + idx_j]
+                            vyj = new_state[nq_snap + idx_j + 1]
 
-                            new_state[nq_snap + idx_i] += impulse / mi * nx
-                            new_state[nq_snap + idx_i + 1] += impulse / mi * ny
-                            new_state[nq_snap + idx_j] -= impulse / mj * nx
-                            new_state[nq_snap + idx_j + 1] -= impulse / mj * ny
+                            # Contact-point velocities include rotation, so an
+                            # off-center hit spins both bodies correctly.
+                            vai, vaj = vxi, vyi
+                            vbi, vbj = vxj, vyj
+                            if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                wi = new_state[nq_snap + idx_i + 2]
+                                vai += -wi * ray
+                                vaj += wi * rax
+                            if hasattr(bj, "theta_sym") and bj.theta_sym is not None:
+                                wj = new_state[nq_snap + idx_j + 2]
+                                vbi += -wj * rby
+                                vbj += wj * rbx
 
-                            # Angular impulse for RigidBody collisions
-                            # Torque = r x J where r = contact_point - COM,
-                            # contact point is between the two bodies.
-                            for (body, idx, side) in [(bi, idx_i, -1), (bj, idx_j, 1)]:
-                                if hasattr(body, "theta_sym") and body.theta_sym is not None:
-                                    theta_idx = idx + 2
-                                    omega_idx = nq_snap + theta_idx
-                                    cx = (xi + xj) / 2
-                                    cy = (yi + yj) / 2
-                                    rx = cx - new_state[idx]
-                                    ry = cy - new_state[idx + 1]
-                                    Jx = impulse / body.m * nx * (-side)
-                                    Jy = impulse / body.m * ny * (-side)
-                                    torque = rx * Jy - ry * Jx
-                                    I_val = body.I
-                                    if I_val > 0:
-                                        new_state[omega_idx] += torque / I_val
+                            vrel = nx * (vai - vbi) + ny * (vaj - vbj)
+                            if vrel < 0:
+                                mi = bi.m
+                                mj = bj.m
+                                e_restitution = float(ed.get("restitution", 1.0))
+                                # Effective mass includes rotational inertia:
+                                # 1/meff = 1/mi + 1/mj + (r_i x n)^2/Ii + (r_j x n)^2/Ij
+                                meff_inv = 1.0 / mi + 1.0 / mj
+                                if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                    rn = rax * ny - ray * nx
+                                    if bi.I > 0:
+                                        meff_inv += rn * rn / bi.I
+                                if hasattr(bj, "theta_sym") and bj.theta_sym is not None:
+                                    rn = rbx * ny - rby * nx
+                                    if bj.I > 0:
+                                        meff_inv += rn * rn / bj.I
+                                impulse = -(1.0 + e_restitution) * vrel / meff_inv
 
-                            vrel_post = vrel + impulse * (1.0 / mi + 1.0 / mj)
-                            if abs(vrel_post) < self.REST_EPS:
-                                # Resting contact: convert to a bilateral
-                                # distance constraint instead of bouncing.
-                                rod = IdealRod(f"rest_{bi.id}_{bj.id}", bi.id, bj.id,
-                                               {"length": dist})
-                                rod.from_node = bi
-                                rod.to_node = bj
-                                rod._contact_rod = True
-                                self.edges.append(rod)
-                                self._resting_pairs.add(frozenset([bi.id, bj.id]))
-                                topology_change = True
-                            else:
-                                # Event geometry already stops at contact. A
-                                # tiny nudge prevents re-triggering on restart.
-                                sep = 1e-10 if ed.get("geometry") else (
-                                    max(0.0, (getattr(bi, "radius", 0.0) + getattr(bj, "radius", 0.0)) - dist) * 0.5 + 1e-10
-                                )
-                                new_state[idx_i] += sep * nx
-                                new_state[idx_i + 1] += sep * ny
-                                new_state[idx_j] -= sep * nx
-                                new_state[idx_j + 1] -= sep * ny
+                                new_state[nq_snap + idx_i] += impulse / mi * nx
+                                new_state[nq_snap + idx_i + 1] += impulse / mi * ny
+                                new_state[nq_snap + idx_j] -= impulse / mj * nx
+                                new_state[nq_snap + idx_j + 1] -= impulse / mj * ny
+
+                                # Torque = r x J at the true contact point.
+                                if hasattr(bi, "theta_sym") and bi.theta_sym is not None:
+                                    torque = rax * (impulse * ny) - ray * (impulse * nx)
+                                    if bi.I > 0:
+                                        new_state[nq_snap + idx_i + 2] += torque / bi.I
+                                if hasattr(bj, "theta_sym") and bj.theta_sym is not None:
+                                    torque = rbx * (-impulse * ny) - rby * (-impulse * nx)
+                                    if bj.I > 0:
+                                        new_state[nq_snap + idx_j + 2] += torque / bj.I
+
+                                vrel_post = vrel + impulse * meff_inv
+                                if abs(vrel_post) < self.REST_EPS:
+                                    # Resting contact: convert to a bilateral
+                                    # distance constraint instead of bouncing.
+                                    d_centers = np.hypot(xi - xj, yi - yj)
+                                    rod = IdealRod(f"rest_{bi.id}_{bj.id}", bi.id, bj.id,
+                                                   {"length": d_centers})
+                                    rod.from_node = bi
+                                    rod.to_node = bj
+                                    rod._contact_rod = True
+                                    self.edges.append(rod)
+                                    self._resting_pairs.add(frozenset([bi.id, bj.id]))
+                                    topology_change = True
+                                else:
+                                    # Event geometry already stops at contact.
+                                    # A tiny nudge prevents re-triggering on
+                                    # restart.
+                                    if ed.get("geometry"):
+                                        sep = 1e-10
+                                    else:
+                                        dist = np.hypot(xi - xj, yi - yj)
+                                        sep = max(0.0, (getattr(bi, "radius", 0.0) + getattr(bj, "radius", 0.0)) - dist) * 0.5 + 1e-10
+                                    new_state[idx_i] += sep * nx
+                                    new_state[idx_i + 1] += sep * ny
+                                    new_state[idx_j] -= sep * nx
+                                    new_state[idx_j + 1] -= sep * ny
 
                 elif etype == "tighten":
                     edge = ed["edge"]
-                    if getattr(edge, "_tight", False):
-                        pass
-                    else:
+                    if not getattr(edge, "_tight", False):
                         edge._tight = True
                         edge._tightened_by_event = True
                         topology_change = True
-                        # Perfectly inelastic tightening: cancel relative
-                        # velocity along the rope.
+                        # Perfectly inelastic tightening: cancel the relative
+                        # velocity along the rope at the attachment points
+                        # (pivot-aware for rigid bodies, so the impulse also
+                        # spins a body whose rope end is off-center).
                         nq_snap = nq
                         a = edge.from_node
                         b = edge.to_node
@@ -1025,39 +1320,57 @@ class Engine:
                         ib = self._body_dof_index(b) if b_dyn else None
                         pa = None if ia is not None else self._anchor_pos_func(a)
                         pb = None if ib is not None else self._anchor_pos_func(b)
+                        pva = getattr(edge, "from_pivot", None)
+                        pvb = getattr(edge, "to_pivot", None)
                         t_now = float(t_event)
-                        if ia is not None:
-                            ax, ay = new_state[ia], new_state[ia + 1]
+
+                        if a_dyn:
+                            ax, ay, vax, vay = self._node_pivot_from_state(
+                                a, pva, new_state, nq_snap)
                         else:
                             ax, ay = pa(t_now)
-                        if ib is not None:
-                            bx, by = new_state[ib], new_state[ib + 1]
+                            vax = vay = 0.0
+                        if b_dyn:
+                            bx, by, vbx, vby = self._node_pivot_from_state(
+                                b, pvb, new_state, nq_snap)
                         else:
                             bx, by = pb(t_now)
+                            vbx = vby = 0.0
+
                         dx = ax - bx
                         dy = ay - by
                         d = np.sqrt(dx * dx + dy * dy) + 1e-15
                         nx, ny = dx / d, dy / d
-                        vax = new_state[nq_snap + ia] if a_dyn else 0.0
-                        vay = new_state[nq_snap + ia + 1] if a_dyn else 0.0
-                        vbx = new_state[nq_snap + ib] if b_dyn else 0.0
-                        vby = new_state[nq_snap + ib + 1] if b_dyn else 0.0
                         dv = nx * (vax - vbx) + ny * (vay - vby)
                         if dv > 0:
-                            if a_dyn and b_dyn:
-                                ma, mb = a.m, b.m
-                                if ma > 0 and mb > 0:
-                                    impulse = dv / (1.0 / ma + 1.0 / mb)
-                                    new_state[nq_snap + ia] -= impulse / ma * nx
-                                    new_state[nq_snap + ia + 1] -= impulse / ma * ny
-                                    new_state[nq_snap + ib] += impulse / mb * nx
-                                    new_state[nq_snap + ib + 1] += impulse / mb * ny
-                            elif a_dyn:
-                                new_state[nq_snap + ia] -= dv * nx
-                                new_state[nq_snap + ia + 1] -= dv * ny
-                            elif b_dyn:
-                                new_state[nq_snap + ib] += dv * nx
-                                new_state[nq_snap + ib + 1] += dv * ny
+                            meff_inv = 0.0
+                            rax = ray = rbx = rby = 0.0
+                            if a_dyn:
+                                rax, ray = ax - new_state[ia], ay - new_state[ia + 1]
+                                meff_inv += 1.0 / a.m
+                                if hasattr(a, "theta_sym") and a.theta_sym is not None and a.I > 0:
+                                    rn = rax * ny - ray * nx
+                                    meff_inv += rn * rn / a.I
+                            if b_dyn:
+                                rbx, rby = bx - new_state[ib], by - new_state[ib + 1]
+                                meff_inv += 1.0 / b.m
+                                if hasattr(b, "theta_sym") and b.theta_sym is not None and b.I > 0:
+                                    rn = rbx * ny - rby * nx
+                                    meff_inv += rn * rn / b.I
+                            if meff_inv > 0:
+                                impulse = dv / meff_inv
+                                if a_dyn:
+                                    new_state[nq_snap + ia] -= impulse / a.m * nx
+                                    new_state[nq_snap + ia + 1] -= impulse / a.m * ny
+                                    if hasattr(a, "theta_sym") and a.theta_sym is not None and a.I > 0:
+                                        torque = rax * (-impulse * ny) - ray * (-impulse * nx)
+                                        new_state[nq_snap + ia + 2] += torque / a.I
+                                if b_dyn:
+                                    new_state[nq_snap + ib] += impulse / b.m * nx
+                                    new_state[nq_snap + ib + 1] += impulse / b.m * ny
+                                    if hasattr(b, "theta_sym") and b.theta_sym is not None and b.I > 0:
+                                        torque = rbx * (impulse * ny) - rby * (impulse * nx)
+                                        new_state[nq_snap + ib + 2] += torque / b.I
 
                 if topology_change:
                     self._step3_energy()
@@ -1081,10 +1394,14 @@ class Engine:
                 })
                 t_current = float(t_event)
             else:
+                keep0 = 0
+                if last_t is not None:
+                    keep = np.where(result.t > last_t + 1e-12)[0]
+                    keep0 = keep[0] if len(keep) else len(result.t)
                 on_chunk({
-                    "t": result.t.tolist(),
-                    "q": result.y[:nq].T.tolist(),
-                    "qd": result.y[nq:2*nq].T.tolist() if result.y.shape[0] >= 2*nq else None,
+                    "t": result.t[keep0:].tolist(),
+                    "q": result.y[:nq, keep0:].T.tolist(),
+                    "qd": result.y[nq:2*nq, keep0:].T.tolist() if result.y.shape[0] >= 2*nq else None,
                     "node_order": node_order,
                     "body_dofs": body_dofs,
                     "complete": True,

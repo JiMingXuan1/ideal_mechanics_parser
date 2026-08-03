@@ -29,3 +29,23 @@ def project_initial_state(q0, qd0, constraints_func, jacobian_func, max_iter=50,
         msg += f"Initial position q0: {q0.tolist()}\n"
     msg += "Initial topology is invalid! Check that constraints reference dynamic bodies, not Anchors."
     raise ProjectionError(msg)
+
+
+def project_initial_velocity(q0, qd0, jacobian_func, f_t_func=None, extra_args=None):
+    """Project initial velocities onto the constraint manifold: J qd = -∂f/∂t.
+
+    Keeps the correction minimal (minimum-norm change to qd0), so velocities
+    that already satisfy the constraints are left untouched.
+    """
+    qd = np.asarray(qd0, dtype=float).copy()
+    J = np.atleast_2d(jacobian_func(*q0, *extra_args))
+    if J.size == 0:
+        return qd
+
+    rhs = J @ qd
+    if f_t_func is not None:
+        rhs = rhs + np.atleast_1d(f_t_func(*q0, *extra_args)).ravel()
+
+    J_pinv = np.linalg.pinv(J)
+    qd = qd - J_pinv @ rhs
+    return qd

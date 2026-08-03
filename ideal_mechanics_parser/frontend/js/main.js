@@ -122,10 +122,23 @@ eb.on('EDGE_END', ({ fromId, toId }) => {
   sel.value = 'IdealRod';
   modal.classList.remove('hidden');
 
+  // Attachment point of a node.  Edges created here have no pivot offsets
+  // yet, so the attachment is simply the node center (matching the backend's
+  // initial-geometry computation).
+  const attachPoint = (id) => sm.getEntity(id);
+  // Actual on-canvas distance between the two nodes being connected, so a
+  // new rod/rope is born at the length the user drew instead of a hardcoded
+  // default that makes the simulation snap the nodes on the first run.
+  const dist = (() => {
+    const a = attachPoint(fromId);
+    const b = toId ? attachPoint(toId) : null;
+    return (a && b) ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  })();
+
   const onConfirm = () => {
     const t = sel.value, id = uid('e'), p = {};
-    if (t === 'IdealRod') p.length = 5;
-    else if (t === 'IdealSpring') { p.k = 100; p.l0 = 1; }
+    if (t === 'IdealRod') p.length = dist || 5;
+    else if (t === 'IdealSpring') { p.k = 100; p.l0 = dist || 1; }
     else if (t === 'SmoothRail') p.expr = 'y - x**2';
     else if (t === 'FixedCoordinate') { p.coord = 'x'; p.value = 0; }
     else if (t === 'LinearRelation') { p.coeffs = [1, -1, -1, 1]; p.constant = 0; }

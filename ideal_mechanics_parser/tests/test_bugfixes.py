@@ -232,3 +232,100 @@ def test_external_force_mg_expression():
     r = Engine(top).run()
     q = np.array(r["q"])
     assert abs(q[-1, 1] - 3.0) < 1e-6, f"Ball should levitate, y={q[-1,1]:.3f}"
+
+
+# ─── Natural length backfill from initial geometry ───────────────────
+
+def test_rod_length_backfilled_from_initial_geometry():
+    """IdealRod without an explicit length must use the actual initial
+    distance between its endpoints (a 3-4-5 triangle), so the projection
+    does not snap the nodes elsewhere on the first run."""
+    top = {
+        "system_env": {"view_plane": "XY", "gravity": 0,
+                       "time_step": 0.01, "duration": 0.1},
+        "nodes": [
+            {"id": "a1", "type": "Anchor", "init_pos": [0.0, 0.0]},
+            {"id": "m1", "type": "MassPoint", "params": {"m": 1.0},
+             "init_state": {"x": 3.0, "y": 4.0, "vx": 0.0, "vy": 0.0}},
+        ],
+        "edges": [
+            {"id": "e1", "type": "IdealRod", "from": "a1", "to": "m1",
+             "params": {}},
+        ],
+    }
+    r = Engine(top).run()
+    q = np.array(r["q"])
+    assert abs(np.hypot(q[0, 0], q[0, 1]) - 5.0) < 1e-9, \
+        f"Rod length should be 5, got {np.hypot(q[0, 0], q[0, 1]):.6f}"
+    assert abs(q[0, 0] - 3.0) < 1e-9, "Mass should not be snapped away"
+
+
+def test_rod_length_backfill_uses_pivot():
+    """Backfill must measure from the actual attachment points: a rod from a
+    rigid body at pivot [1, 0] to a mass at x=4 is length 3, not 4."""
+    top = {
+        "system_env": {"view_plane": "XY", "gravity": 0,
+                       "time_step": 0.01, "duration": 0.1},
+        "nodes": [
+            {"id": "b1", "type": "RigidBody",
+             "params": {"m": 1.0, "shape": "rect", "length": 2, "width": 0.5},
+             "init_state": {"x": 0.0, "y": 0.0, "theta": 0.0,
+                            "vx": 0, "vy": 0, "omega": 0}},
+            {"id": "m1", "type": "MassPoint", "params": {"m": 1.0},
+             "init_state": {"x": 4.0, "y": 0.0, "vx": 0.0, "vy": 0.0}},
+        ],
+        "edges": [
+            {"id": "e1", "type": "IdealRod", "from": "b1", "to": "m1",
+             "params": {"from_pivot": [1.0, 0.0]}},
+        ],
+    }
+    engine = Engine(top)
+    engine._step1_instantiate()
+    assert abs(engine.edges[0].length - 3.0) < 1e-9
+
+
+def test_spring_l0_backfilled_from_initial_geometry():
+    """IdealSpring without l0 must use the initial stretch as rest length,
+    so a mass at x=2 hangs without drifting."""
+    top = {
+        "system_env": {"view_plane": "XY", "gravity": 0,
+                       "time_step": 0.01, "duration": 0.1},
+        "nodes": [
+            {"id": "a1", "type": "Anchor", "init_pos": [0.0, 0.0]},
+            {"id": "m1", "type": "MassPoint", "params": {"m": 1.0},
+             "init_state": {"x": 2.0, "y": 0.0, "vx": 0.0, "vy": 0.0}},
+        ],
+        "edges": [
+            {"id": "e1", "type": "IdealSpring", "from": "a1", "to": "m1",
+             "params": {"k": 10.0}},
+        ],
+    }
+    r = Engine(top).run()
+    q = np.array(r["q"])
+    assert abs(q[0, 0] - 2.0) < 1e-9 and abs(q[-1, 0] - 2.0) < 1e-9
+
+
+def test_taut_rope_releases_when_pushed():
+    """A rope that is taut from the start (exactly at its length) must
+    slacken when the constraint is in compression, even though no tighten
+    event ever fires (no events exist at all in that configuration)."""
+    top = {
+        "system_env": {"view_plane": "XZ", "gravity": 9.81,
+                       "time_step": 0.01, "duration": 2.0, "max_mutations": 100},
+        "nodes": [
+            {"id": "a1", "type": "Anchor", "init_pos": [0, 0]},
+            {"id": "p1", "type": "MassPoint", "params": {"m": 1.0},
+             "init_state": {"x": 0, "y": 2.0, "vx": 0, "vy": 0}},
+        ],
+        "edges": [
+            {"id": "rope", "type": "SoftRope", "from": "a1", "to": "p1",
+             "params": {"length": 2.0}},
+        ],
+    }
+    chunks = _run_events(top)
+    errors = [c for c in chunks if "error" in c]
+    assert len(errors) == 0, f"Unexpected errors: {errors}"
+    q = _trajectory(chunks)
+    dist = np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2)
+    assert dist.min() < 2.0 - 1e-3, \
+        "Rope pushed toward the anchor should go slack, but never did"
